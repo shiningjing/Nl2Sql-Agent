@@ -1,0 +1,38 @@
+{
+  "sqlite": [
+    "Use GROUP_CONCAT(expr, separator) for string aggregation.",
+    "Use double-quoted identifiers for reserved words (e.g., \"column_name\").",
+    "Use strftime() for date formatting (e.g., strftime('%Y-%m', date_col)).",
+    "Use || for string concatenation (e.g., first_name || ' ' || last_name).",
+    "Boolean values: use 0 and 1 (no TRUE/FALSE keywords).",
+    "INTEGER PRIMARY KEY is auto-incrementing by default.",
+    "Use CAST(expr AS type) for type conversion (e.g., CAST(price AS INTEGER)).",
+    "No window function support before version 3.25. Avoid ROW_NUMBER(), RANK(), etc. unless certain.",
+    "Use ROUND(value, decimals) for rounding numbers.",
+    "No RIGHT JOIN or FULL OUTER JOIN. Use LEFT JOIN instead and reorder tables if needed."
+  ],
+  "postgresql": [
+    "Use STRING_AGG(expr, delimiter ORDER BY ...) for string aggregation.",
+    "Use ::type for type casting (e.g., value::integer, value::text, value::numeric).",
+    "Use ILIKE for case-insensitive pattern matching (e.g., name ILIKE '%abc%').",
+    "Use DISTINCT ON (column) to keep the first row per group.",
+    "Use double-quoted identifiers for reserved words or mixed case (e.g., \"UserName\").",
+    "Use || for string concatenation (e.g., first_name || ' ' || last_name).",
+    "Use DATE_TRUNC('unit', timestamp) for date truncation (e.g., DATE_TRUNC('month', created_at)).",
+    "Use LIMIT n OFFSET m for pagination (not LIMIT m, n).",
+    "Use BOOL_AND(expr) / BOOL_OR(expr) for boolean aggregation.",
+    "Use FILTER (WHERE ...) clause on aggregates for conditional aggregation (e.g., COUNT(*) FILTER (WHERE status = 'active'))."
+  ],
+  "mysql": [
+    "Use GROUP_CONCAT(expr ORDER BY ... SEPARATOR '...') for string aggregation.",
+    "Use backtick-quoted identifiers for reserved words (e.g., `order`, `status`).",
+    "Use DATE_FORMAT(date_col, '%Y-%m') for date formatting.",
+    "Use LIMIT offset, count for pagination (e.g., LIMIT 10, 20 means skip 10, return 20).",
+    "Use AUTO_INCREMENT for auto-incrementing primary keys.",
+    "Use CONCAT(str1, str2, ...) for string concatenation (|| is not supported).",
+    "Use IFNULL(expr, default) or COALESCE(expr, default) for NULL handling.",
+    "Use YEAR(date_col), MONTH(date_col), DAY(date_col) to extract date parts.",
+    "Use REGEXP for regular expression matching (e.g., name REGEXP '^[A-Z]').",
+    "No FULL OUTER JOIN. Emulate with LEFT JOIN UNION RIGHT JOIN if needed."
+  ]
+}

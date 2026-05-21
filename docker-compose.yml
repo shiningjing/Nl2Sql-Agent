@@ -1,0 +1,69 @@
+version: "3.9"
+
+services:
+  app:
+    build: .
+    ports:
+      - "8501:8501"
+    environment:
+      - LLM_BASE_URL=${LLM_BASE_URL:-https://api.deepseek.com/v1}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_CHAT_MODEL=${LLM_CHAT_MODEL:-deepseek-v4-pro}
+      - SQL_DIALECT=${SQL_DIALECT:-sqlite}
+      - DATABASE_URL=sqlite:///./data/demo.db
+      - CHROMA_PERSIST_DIR=./.chroma
+      - CORPUS_DIR=./corpus
+      - EMBED_MODEL_NAME=${EMBED_MODEL_NAME:-BAAI/bge-small-zh-v1.5}
+    volumes:
+      - chroma_data:/app/.chroma
+      - hf_cache:/root/.cache/huggingface
+      - ./data/demo.db:/app/data/demo.db:ro
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: nl2sql
+      POSTGRES_PASSWORD: nl2sql
+      POSTGRES_DB: demo
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./data/seed_pg.sql:/docker-entrypoint-initdb.d/01_seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nl2sql -d demo"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: nl2sql_root
+      MYSQL_USER: nl2sql
+      MYSQL_PASSWORD: nl2sql
+      MYSQL_DATABASE: demo
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./data/seed_mysql.sql:/docker-entrypoint-initdb.d/01_seed.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "nl2sql", "-pnl2sql"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  chroma_data:
+  hf_cache:
+  pg_data:
+  mysql_data:

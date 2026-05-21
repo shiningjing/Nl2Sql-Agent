@@ -1,0 +1,34 @@
+# Environment
+.env
+.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# ChromaDB (keep data separate via volume)
+.chroma/
+
+# IDE
+.vscode/
+.idea/
+
+# Reports
+reports/
+
+# Tests
+tests/
+
+# Git
+.git/
+.gitignore
+
+# Docs
+docs/
+*.md
+
+# Plans
+.claude/
