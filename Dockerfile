@@ -2,7 +2,7 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# System deps for sentence-transformers
+# System deps for sentence-transformers + database drivers
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
@@ -18,11 +18,12 @@ RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTr
 COPY . .
 
 # ChromaDB persistent storage + HF cache
-VOLUME ["/app/.chroma", "/root/.cache/huggingface"]
+VOLUME ["/app/.chroma"]
+VOLUME ["/root/.cache/huggingface"]
 
 EXPOSE 8501
 
 ENV STREAMLIT_SERVER_PORT=8501
 ENV STREAMLIT_SERVER_ADDRESS=0.0.0.0
 
-CMD ["streamlit", "run", "app.py", "--server.headless", "true"]
+CMD ["streamlit", "run", "app.py"]

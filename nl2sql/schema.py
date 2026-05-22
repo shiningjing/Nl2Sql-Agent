@@ -8,12 +8,13 @@ from .config import Config
 
 @lru_cache(maxsize=64)
 def get_engine(database_url: str | None = None):
-    engine = create_engine(database_url or Config.DATABASE_URL, echo=False)
+    url = database_url or Config.DATABASE_URL
+    engine = create_engine(url, echo=False)
 
-    @event.listens_for(engine, "connect")
-    def _set_wal(dbapi_connection, connection_record):
-        """Enable WAL mode so concurrent SELECTs don't contend on file locks."""
-        dbapi_connection.execute("PRAGMA journal_mode=WAL")
+    if url.startswith("sqlite"):
+        @event.listens_for(engine, "connect")
+        def _set_wal(dbapi_connection, connection_record):
+            dbapi_connection.execute("PRAGMA journal_mode=WAL")
 
     return engine
 
@@ -67,8 +68,9 @@ def get_schema_summary(database_url: str | None = None) -> str:
     """Build a compressed DDL block for the LLM prompt."""
     if not database_url:
         return ""
+    from nl2sql.generate import get_dialect_from_url
     info = _get_cached_schema_info(database_url)
-    dialect = Config.SQL_DIALECT.upper()
+    dialect = get_dialect_from_url(database_url)
     lines = [f"-- SQL Dialect: {dialect}\n"]
 
     for t_lower, t_info in info.items():

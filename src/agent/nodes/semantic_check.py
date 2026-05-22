@@ -211,18 +211,10 @@ def semantic_check_node(state: AgentState) -> dict:
         preview=preview,
     )
 
-    from langchain_openai import ChatOpenAI
     from langchain_core.messages import SystemMessage, HumanMessage
+    from src.infrastructure.llm_factory import get_llm
 
-    chat = ChatOpenAI(
-        model=Config.LLM_CHAT_MODEL,
-        api_key=Config.LLM_API_KEY,
-        base_url=Config.LLM_BASE_URL,
-        temperature=0,
-        max_tokens=80,
-        request_timeout=12,
-        max_retries=0,
-    )
+    chat = get_llm(temperature=0, max_tokens=80, request_timeout=12, max_retries=0)
 
     tu = {}
     try:

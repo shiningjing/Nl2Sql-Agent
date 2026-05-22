@@ -196,20 +196,12 @@ def _llm_classify(question: str) -> tuple[str, str, dict, float]:
     """
     import re
     import logging
-    from langchain_openai import ChatOpenAI
     from langchain_core.messages import SystemMessage, HumanMessage
+    from src.infrastructure.llm_factory import get_llm
 
     _log = logging.getLogger(__name__)
 
-    chat = ChatOpenAI(
-        model=Config.LLM_CHAT_MODEL,
-        api_key=Config.LLM_API_KEY,
-        base_url=Config.LLM_BASE_URL,
-        temperature=0,
-        max_tokens=10,
-        request_timeout=12,
-        max_retries=0,
-    )
+    chat = get_llm(temperature=0, max_tokens=10, request_timeout=12, max_retries=0)
 
     from src.prompts import ROUTER_CLASSIFIER_PROMPT
     system = ROUTER_CLASSIFIER_PROMPT

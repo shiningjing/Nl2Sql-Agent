@@ -6,6 +6,13 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+class LLMConfig(BaseModel):
+    """Optional per-request LLM overrides. Falls back to env vars if not set."""
+    model: str | None = Field(default=None, description="Model name, e.g. deepseek-v4-pro")
+    api_key: str | None = Field(default=None, description="API key")
+    base_url: str | None = Field(default=None, description="API base URL, e.g. https://api.deepseek.com/v1")
+
+
 class QueryRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=2000)
     rag_schema: bool = Field(default=True)
@@ -15,6 +22,7 @@ class QueryRequest(BaseModel):
     use_cache: bool = Field(default=True)
     database_url: str | None = Field(default=None)
     db_id: str | None = Field(default=None, description="BIRD database ID for RAG filtering")
+    llm: LLMConfig | None = Field(default=None, description="Optional LLM overrides")
 
 
 class QueryFullRequest(BaseModel):
@@ -30,6 +38,7 @@ class QueryFullRequest(BaseModel):
     use_cache: bool = Field(default=True)
     database_url: str | None = Field(default=None)
     db_id: str | None = Field(default=None, description="BIRD database ID for RAG filtering")
+    llm: LLMConfig | None = Field(default=None, description="Optional LLM overrides")
 
 
 class ExecResult(BaseModel):

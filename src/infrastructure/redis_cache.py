@@ -1,6 +1,6 @@
-"""Redis cache layer — LLM semantic cache + Schema metadata cache.
+"""Redis cache layer — LLM semantic cache.
 
-LLM semantic cache: stores (question embedding, SQL, exec result) in Redis.
+Stores (question embedding, SQL, exec result) in Redis.
 Lookup computes cosine similarity of incoming question against cached embeddings.
 On hit (>0.95), re-executes cached SQL as safety verification.
 On miss or exec failure, returns None — caller falls through to normal pipeline.
@@ -15,7 +15,6 @@ import uuid
 
 import redis
 
-from nl2sql.config import Config
 from src.shared_embedder import get_embedder
 
 _log = logging.getLogger("nl2sql.cache")
@@ -23,6 +22,7 @@ _log = logging.getLogger("nl2sql.cache")
 # ── Lazy singletons ──────────────────────────────────────────────────────────
 
 _redis: redis.Redis | None = None
+_redis_checked: bool = False
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -32,33 +32,68 @@ _CACHE_TTL = 7200  # 2 hours
 _CACHE_SIM_THRESHOLD = 0.95
 _MAX_CACHED_ROWS = 50  # truncate exec_result data to control memory
 
-_SCHEMA_DDL_PREFIX = "schema_cache:ddl"
-_SCHEMA_CATALOG_PREFIX = "schema_cache:catalog"
-_SCHEMA_CACHE_TTL = 300  # 5 minutes
+_CANDIDATE_URLS = [
+    "redis://127.0.0.1:6379/0",   # local Redis or Docker port mapping
+    "redis://redis:6379/0",       # Docker Compose internal
+]
 
 
 # ── Connection ────────────────────────────────────────────────────────────────
 
+def _try_connect(url: str) -> redis.Redis | None:
+    """Attempt a single Redis connection. Returns client or None."""
+    try:
+        client = redis.Redis.from_url(
+            url,
+            decode_responses=True,
+            socket_connect_timeout=2,
+        )
+        client.ping()
+        return client
+    except (redis.ConnectionError, redis.TimeoutError):
+        return None
+
+
 def get_redis() -> redis.Redis | None:
-    """Lazy-init Redis connection. Returns None if unavailable (graceful degradation)."""
-    global _redis
-    if _redis is None:
-        try:
-            client = redis.Redis.from_url(
-                Config.REDIS_URL,
-                decode_responses=True,
-                socket_connect_timeout=2,
-            )
-            client.ping()
-            _redis = client
+    """Lazy-init Redis connection with local-first fallback.
+
+    Tries 127.0.0.1:6379 first (local / Docker port mapping),
+    then redis:6379 (Docker Compose internal DNS).
+    Config.REDIS_URL overrides if explicitly set to non-default.
+    Returns None if all attempts fail (graceful degradation).
+    """
+    global _redis, _redis_checked
+    if _redis is not None:
+        return _redis
+    if _redis_checked:
+        return None
+
+    from nl2sql.config import Config
+
+    # Explicit env override takes priority
+    env_url = Config.REDIS_URL
+    is_default = env_url == "redis://localhost:6379/0"
+    if not is_default:
+        _redis = _try_connect(env_url)
+        if _redis:
+            _redis_checked = True
             _log.info(json.dumps({"event": "redis_connect", "status": "ok",
-                                   "url": Config.REDIS_URL.split("@")[-1] if "@" in Config.REDIS_URL else Config.REDIS_URL}))
-        except (redis.ConnectionError, redis.TimeoutError):
-            _redis = None
-            _log.warning(json.dumps({"event": "redis_connect", "status": "unavailable",
-                                      "url": Config.REDIS_URL.split("@")[-1] if "@" in Config.REDIS_URL else Config.REDIS_URL}))
-            return None
-    return _redis
+                                   "url": env_url.split("@")[-1] if "@" in env_url else env_url}))
+            return _redis
+
+    # Local-first auto-detect
+    for url in _CANDIDATE_URLS:
+        _redis = _try_connect(url)
+        if _redis:
+            _redis_checked = True
+            _log.info(json.dumps({"event": "redis_connect", "status": "ok",
+                                   "url": url.split("@")[-1] if "@" in url else url}))
+            return _redis
+
+    _redis_checked = True
+    _log.warning(json.dumps({"event": "redis_connect", "status": "unavailable",
+                               "tried": _CANDIDATE_URLS}))
+    return None
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -162,52 +197,8 @@ def cache_set_llm(question: str, sql: str, exec_result: dict) -> None:
     r.setex(
         f"{_CACHE_PREFIX}:{cache_id}",
         _CACHE_TTL,
-        json.dumps(entry, ensure_ascii=False),
+        json.dumps(entry, ensure_ascii=False, default=str),
     )
     r.sadd(_CACHE_KEYS_SET, cache_id)
     _log.info(json.dumps({"event": "cache_store", "question": question[:80],
                            "cache_id": cache_id}))
-
-
-# ── Schema Metadata Cache ────────────────────────────────────────────────────
-
-def cache_get_schema(database_url: str) -> str | None:
-    """Get cached DDL for a database URL."""
-    r = get_redis()
-    if r is None:
-        return None
-    return r.get(f"{_SCHEMA_DDL_PREFIX}:{database_url}")
-
-
-def cache_set_schema(database_url: str, ddl: str, ttl: int = _SCHEMA_CACHE_TTL) -> None:
-    """Cache DDL for a database URL."""
-    r = get_redis()
-    if r is None:
-        return
-    r.setex(f"{_SCHEMA_DDL_PREFIX}:{database_url}", ttl, ddl)
-
-
-def cache_get_table_catalog(database_url: str) -> list | None:
-    """Get cached table catalog (list of {name, columns, ...} dicts) for a database URL."""
-    r = get_redis()
-    if r is None:
-        return None
-    raw = r.get(f"{_SCHEMA_CATALOG_PREFIX}:{database_url}")
-    if raw is None:
-        return None
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return None
-
-
-def cache_set_table_catalog(database_url: str, catalog: list, ttl: int = _SCHEMA_CACHE_TTL) -> None:
-    """Cache table catalog for a database URL."""
-    r = get_redis()
-    if r is None:
-        return
-    r.setex(
-        f"{_SCHEMA_CATALOG_PREFIX}:{database_url}",
-        ttl,
-        json.dumps(catalog, ensure_ascii=False),
-    )

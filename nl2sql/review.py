@@ -1,9 +1,9 @@
 """Reviewer Agent — static SQL review before execution."""
 import json
 import re
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
 from .config import Config
+from src.infrastructure.llm_factory import get_llm
 
 REVIEWER_PROMPT = """You are a SQL reviewer. Your job is to find errors in a generated SQL query. You NEVER generate SQL yourself — you only review.
 
@@ -13,7 +13,7 @@ For each of the following categories, check the SQL and report any issues:
 1. **Schema alignment**: Does every table name and column name exist in the SCHEMA below? Flag any identifier that is not in the schema (hallucination).
 2. **Syntax completeness**: Does every JOIN have an ON condition? Does every GROUP BY include non-aggregated columns? Do subqueries have aliases?
 3. **Business rules**: Does the SQL logic match the RETRIEVED NOTES (if provided)? For example, if notes say "valid orders exclude cancelled/refunded", does the SQL filter accordingly?
-4. **Dialect compliance**: Are the functions and syntax valid for SQLite?
+4. **Dialect compliance**: Are the functions and syntax valid for {dialect}?
 5. **Safety**: Does the SQL contain INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, PRAGMA? If so, flag immediately.
 
 ## Output format (strict JSON only, no markdown, no extra text)
@@ -42,14 +42,7 @@ or if issues found:
 
 
 def get_review_chat():
-    return ChatOpenAI(
-        model=Config.LLM_CHAT_MODEL,
-        api_key=Config.LLM_API_KEY,
-        base_url=Config.LLM_BASE_URL,
-        temperature=0,
-        request_timeout=45,
-        max_retries=0,
-    )
+    return get_llm(temperature=0, request_timeout=45, max_retries=0)
 
 
 def extract_json(response: str) -> dict:
@@ -139,7 +132,7 @@ def _hard_check_hallucinations(sql: str, schema_text: str) -> list[dict]:
     return issues
 
 
-def review(sql: str, schema_text: str, notes_text: str = "") -> dict:
+def review(sql: str, schema_text: str, notes_text: str = "", dialect: str = "sqlite") -> dict:
     """Review a SQL query. Returns {valid, issues, critical_count, suggested_fix}.
 
     Hard check runs first (code-level hallucination detection).
@@ -161,7 +154,7 @@ def review(sql: str, schema_text: str, notes_text: str = "") -> dict:
     user_message = "\n\n".join(parts)
 
     response = chat.invoke([
-        SystemMessage(content=REVIEWER_PROMPT),
+        SystemMessage(content=REVIEWER_PROMPT.format(dialect=dialect)),
         HumanMessage(content=user_message),
     ])
 

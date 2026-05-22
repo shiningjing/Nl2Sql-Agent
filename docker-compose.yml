@@ -9,21 +9,34 @@ services:
       - LLM_BASE_URL=${LLM_BASE_URL:-https://api.deepseek.com/v1}
       - LLM_API_KEY=${LLM_API_KEY:-}
       - LLM_CHAT_MODEL=${LLM_CHAT_MODEL:-deepseek-v4-pro}
-      - SQL_DIALECT=${SQL_DIALECT:-sqlite}
-      - DATABASE_URL=sqlite:///./data/demo.db
-      - CHROMA_PERSIST_DIR=./.chroma
-      - CORPUS_DIR=./corpus
       - EMBED_MODEL_NAME=${EMBED_MODEL_NAME:-BAAI/bge-small-zh-v1.5}
+      - REDIS_URL=redis://redis:6379/0
     volumes:
       - chroma_data:/app/.chroma
       - hf_cache:/root/.cache/huggingface
-      - ./data/demo.db:/app/data/demo.db:ro
+      - ./data/bird:/app/data/bird:ro
+      - ./databases.json:/app/databases.json:ro
     restart: unless-stopped
     depends_on:
+      redis:
+        condition: service_started
       postgres:
         condition: service_healthy
       mysql:
         condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
 
   postgres:
     image: postgres:16-alpine
@@ -65,5 +78,6 @@ services:
 volumes:
   chroma_data:
   hf_cache:
+  redis_data:
   pg_data:
   mysql_data:

@@ -20,8 +20,8 @@ async def lifespan(app: FastAPI):
     # Pre-load embedding model in background thread (non-blocking)
     def _warm_embedding():
         try:
-            from src.infrastructure.redis_cache import _get_embedder
-            _get_embedder()
+            from src.shared_embedder import get_embedder
+            get_embedder()
             _log.info("Embedding model loaded")
         except Exception as e:
             _log.warning(f"Embedding model load failed: {e}")

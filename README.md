@@ -68,38 +68,84 @@ Natural language to SQL based on LangGraph with RAG-augmented schema retrieval a
 pip install -r requirements.txt
 cp .env.example .env        # add your LLM_API_KEY
 python scripts/ingest.py    # build RAG index
-streamlit run app.py
+streamlit run app.py        # start frontend (http://127.0.0.1:8501)
 ```
 
-Or with Docker:
+Or with Docker (includes MySQL + PostgreSQL demo databases):
 
 ```bash
-docker compose up -d
+docker compose up -d                 # start all services
+python scripts/_smoke_multidb.py     # multi-database smoke test (9 questions × 3 dialects)
 ```
+
+## LLM Provider Switching
+
+Streamlit sidebar Provider dropdown with 4 presets, auto-fills model name and API URL:
+
+| Provider | Model | Notes |
+|----------|-------|-------|
+| DeepSeek V4 Pro | deepseek-v4-pro | Default, OpenAI-compatible |
+| OpenAI GPT-4o | gpt-4o | Requires OpenAI API key |
+| Claude Opus 4.7 | claude-opus-4-7 | Auto-switches to ChatAnthropic |
+| Custom | (any) | OpenAI-compatible APIs |
+
+Keys stored in `llm_keys.json` (git-ignored):
+```json
+{"deepseek": "sk-xxx", "openai": "sk-xxx", "anthropic": "sk-ant-xxx"}
+```
+
+## Bring Your Own Database
+
+Edit `databases.json` — dialect, table count, and online status auto-detected:
+
+```json
+{
+  "databases": [
+    {"db_id": "my_mysql", "display_name": "Production MySQL",
+     "database_url": "mysql+pymysql://user:pass@host:3306/db"},
+    {"db_id": "my_pg", "display_name": "Analytics PG",
+     "database_url": "postgresql+psycopg2://user:pass@host:5432/db"},
+    {"db_id": "docker_mysql", "display_name": "Docker MySQL Demo",
+     "database_url": "mysql+pymysql://nl2sql:nl2sql@127.0.0.1:3306/demo"},
+    {"db_id": "docker_pg", "display_name": "Docker PG Demo",
+     "database_url": "postgresql+psycopg2://nl2sql:nl2sql@127.0.0.1:5432/demo"}
+  ]
+}
+```
+
+Docker users: `docker compose up -d mysql postgres` to spin up demo databases.
+
+Save and refresh Streamlit — databases appear in the dropdown. Offline databases are tagged "(offline)".
 
 ## API
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/v1/query` | Mini pipeline |
-| `POST` | `/api/v1/query/full` | Full LangGraph pipeline |
+| `POST` | `/api/v1/query` | Mini pipeline (single-gen + self-correction) |
+| `POST` | `/api/v1/query/full` | Full LangGraph pipeline (Vote + SemCheck) |
+| `POST` | `/api/v1/query/full/stream` | Full pipeline SSE streaming (per-node progress) |
 | `GET` | `/api/v1/health` | Health check |
 | `GET` | `/api/v1/schema` | Schema DDL + table catalog |
 
 ```json
 // POST /api/v1/query/full
-{ "question": "Find the top 5 products by revenue" }
+{
+  "question": "Find the top 5 products by revenue",
+  "db_id": "mysql_demo",
+  "database_url": "mysql+pymysql://nl2sql:nl2sql@127.0.0.1:3306/demo",
+  "llm": {"model": "deepseek-v4-pro", "api_key": "sk-xxx", "base_url": ""}
+}
 ```
 
 ## Multi-Database
 
-| Dialect | Connection String |
-|---------|------------------|
-| SQLite | `sqlite:///./data/demo.db` |
-| PostgreSQL | `postgresql://user:pass@localhost:5432/demo` |
-| MySQL | `mysql+pymysql://user:pass@localhost:3306/demo` |
+| Dialect | Connection String | Source |
+|---------|------------------|--------|
+| SQLite | `sqlite:///./data/demo.db` | Built-in BIRD (11 DBs) |
+| MySQL | `mysql+pymysql://user:pass@localhost:3306/demo` | User JSON |
+| PostgreSQL | `postgresql+psycopg2://user:pass@host:5432/demo` | User JSON |
 
-Dialect auto-detected from connection string — injected into LLM prompt and AST validation.
+Dialect auto-detected from connection string — injects dialect-specific few-shot (`corpus/bird_fewshot/mysql.md`, `postgresql.md`), switches AST validation dialect, and applies corresponding error classification rules.
 
 ## BIRD Mini-Dev Results
 
@@ -140,12 +186,12 @@ python scripts/_precompute_gold.py
 
 | Layer | Choice |
 |-------|--------|
-| LLM | DeepSeek API |
+| LLM | DeepSeek / OpenAI / Claude |
 | Embedding | BAAI/bge-small-zh-v1.5 (local) |
 | Vector DB | ChromaDB |
 | Orchestration | LangGraph + LangChain |
 | Databases | SQLite / PostgreSQL / MySQL |
-| AST Guard | sqlglot |
+| AST Guard | sqlglot (auto-detect dialect) |
 | API | FastAPI + Pydantic |
 | Cache | Redis |
 | Frontend | Streamlit |
@@ -156,6 +202,7 @@ python scripts/_precompute_gold.py
 |----------|---------|
 | `LLM_BASE_URL` | `https://api.deepseek.com/v1` |
 | `LLM_CHAT_MODEL` | `deepseek-v4-pro` |
-| `SQL_DIALECT` | `sqlite` |
+| `LLM_API_KEY` | (from `llm_keys.json` or env) |
 | `DATABASE_URL` | `sqlite:///./data/demo.db` |
 | `REDIS_URL` | `redis://localhost:6379/0` |
+| `EMBED_MODEL_NAME` | `BAAI/bge-small-zh-v1.5` |

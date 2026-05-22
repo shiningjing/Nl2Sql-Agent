@@ -4,10 +4,7 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _PROJECT_ROOT)
 os.chdir(_PROJECT_ROOT)
 
-from src.infrastructure.redis_cache import (
-    get_redis, cache_get_llm, cache_set_llm,
-    cache_get_schema, cache_set_schema,
-)
+from src.infrastructure.redis_cache import get_redis, cache_get_llm, cache_set_llm
 
 # 1. Connection
 r = get_redis()
@@ -38,14 +35,7 @@ q2 = "What is the average age of customers in Beijing?"
 cached2 = cache_get_llm(q2)
 print(f"   Different question: {'HIT' if cached2 else 'MISS'} (expected: MISS)")
 
-# 3. Schema cache (should be unused — verify)
-print()
-print("3. Schema cache test (not currently wired):")
-url = "sqlite:///test.db"
-cached_ddl = cache_get_schema(url)
-print(f"   Schema DDL cache (should be empty): {cached_ddl is None}")
-
 # Cleanup
 r.flushdb()
 print()
-print("4. Cleanup done. Redis is working.")
+print("3. Cleanup done. Redis is working.")

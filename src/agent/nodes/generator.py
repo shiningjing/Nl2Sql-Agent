@@ -39,17 +39,14 @@ def _generate_one(
     token_callback: Callable[[str], None] | None = None,
 ) -> tuple[str, str, dict, float]:
     """Generate a single SQL at a given temperature. Supports token-level streaming."""
-    from langchain_openai import ChatOpenAI
     from langchain_core.messages import SystemMessage, HumanMessage
     from nl2sql.config import Config
     from nl2sql.generate import SYSTEM_PROMPT, _format_sub_questions, extract_sql, _get_dialect_rules
+    from src.infrastructure.llm_factory import get_llm
 
     _dialect = (dialect or Config.SQL_DIALECT).upper()
 
-    chat = ChatOpenAI(
-        model=Config.LLM_CHAT_MODEL,
-        api_key=Config.LLM_API_KEY,
-        base_url=Config.LLM_BASE_URL,
+    chat = get_llm(
         temperature=temperature,
         request_timeout=45,
         max_retries=0,

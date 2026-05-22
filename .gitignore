@@ -27,6 +27,7 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+llm_keys.json
 
 # ── Data (large binaries) ──
 data/bird/

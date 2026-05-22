@@ -2,7 +2,13 @@
 import re
 
 from nl2sql.schema import _get_cached_schema_info
-from nl2sql.config import Config
+
+
+def _get_dialect(database_url: str) -> str:
+    for prefix, d in [("postgresql", "postgresql"), ("mysql", "mysql")]:
+        if database_url and database_url.startswith(prefix):
+            return d
+    return "sqlite"
 
 
 # ── Tokenization & scoring ────────────────────────────────────────────────────
@@ -85,7 +91,7 @@ def build_compact_ddl(
 ) -> str:
     """Generate DDL with only selected columns per table."""
     schema_info = _get_cached_schema_info(database_url) if database_url else {}
-    dialect = Config.SQL_DIALECT.upper()
+    dialect = _get_dialect(database_url)
     lines = [f"-- SQL Dialect: {dialect}"]
 
     for t in table_names:

@@ -32,7 +32,6 @@ def _llm_vote(question: str, schema_text: str, candidates: list[str], tlog=None)
     if len(candidates) == 1:
         return candidates[0]
 
-    from langchain_openai import ChatOpenAI
     from langchain_core.messages import SystemMessage, HumanMessage
     from nl2sql.config import Config
     import re
@@ -53,15 +52,9 @@ def _llm_vote(question: str, schema_text: str, candidates: list[str], tlog=None)
     if tlog:
         tlog.node_enter("voter_llm", {"candidate_count": len(candidates)})
 
-    chat = ChatOpenAI(
-        model=Config.LLM_CHAT_MODEL,
-        api_key=Config.LLM_API_KEY,
-        base_url=Config.LLM_BASE_URL,
-        temperature=0,
-        max_tokens=10,
-        request_timeout=15,
-        max_retries=0,
-    )
+    from src.infrastructure.llm_factory import get_llm
+
+    chat = get_llm(temperature=0, max_tokens=10, request_timeout=15, max_retries=0)
 
     try:
         _t0 = time.time()

@@ -68,38 +68,84 @@
 pip install -r requirements.txt
 cp .env.example .env        # 填入 LLM_API_KEY
 python scripts/ingest.py    # 构建 RAG 索引
-streamlit run app.py
+streamlit run app.py        # 启动前端（http://127.0.0.1:8501）
 ```
 
-Docker 部署：
+Docker 部署（含 MySQL + PostgreSQL Demo 数据库）：
 
 ```bash
-docker compose up -d
+docker compose up -d                 # 启动全部服务
+python scripts/_smoke_multidb.py     # 多数据库冒烟测试（9 题 × 3 方言）
 ```
+
+## LLM 多模型切换
+
+Streamlit 侧边栏 Provider 下拉框支持 4 个预设，自动填充模型名和 API 地址：
+
+| Provider | Model | 说明 |
+|----------|-------|------|
+| DeepSeek V4 Pro | deepseek-v4-pro | 默认，兼容 OpenAI SDK |
+| OpenAI GPT-4o | gpt-4o | 需 OpenAI API Key |
+| Claude Opus 4.7 | claude-opus-4-7 | 底层自动切换 ChatAnthropic |
+| Custom | 自定义 | 兼容任意 OpenAI 兼容 API |
+
+密钥文件 `llm_keys.json`（不提交 Git）：
+```json
+{"deepseek": "sk-xxx", "openai": "sk-xxx", "anthropic": "sk-ant-xxx"}
+```
+
+## 接入自己的数据库
+
+编辑 `databases.json`，系统自动检测方言、表数量、在线状态：
+
+```json
+{
+  "databases": [
+    {"db_id": "my_mysql", "display_name": "生产 MySQL",
+     "database_url": "mysql+pymysql://user:pass@host:3306/db"},
+    {"db_id": "my_pg", "display_name": "分析 PG",
+     "database_url": "postgresql+psycopg2://user:pass@host:5432/db"},
+    {"db_id": "docker_mysql", "display_name": "Docker MySQL Demo",
+     "database_url": "mysql+pymysql://nl2sql:nl2sql@127.0.0.1:3306/demo"},
+    {"db_id": "docker_pg", "display_name": "Docker PG Demo",
+     "database_url": "postgresql+psycopg2://nl2sql:nl2sql@127.0.0.1:5432/demo"}
+  ]
+}
+```
+
+Docker 环境可快速启动 Demo 数据库：`docker compose up -d mysql postgres`
+
+保存后刷新 Streamlit 页面，数据库自动出现在下拉框，离线数据库标记 "(offline)"。
 
 ## API 端点
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `POST` | `/api/v1/query` | Mini 管线 |
-| `POST` | `/api/v1/query/full` | Full LangGraph 管线 |
+| `POST` | `/api/v1/query` | Mini 管线（单次生成+自修复） |
+| `POST` | `/api/v1/query/full` | Full LangGraph 管线（含 Vote+SemCheck） |
+| `POST` | `/api/v1/query/full/stream` | Full 管线 SSE 流式（节点级进度推送） |
 | `GET` | `/api/v1/health` | 健康检查 |
 | `GET` | `/api/v1/schema` | Schema DDL + 表目录 |
 
 ```json
 // POST /api/v1/query/full
-{ "question": "查询销售额最高的 5 个产品" }
+{
+  "question": "查询销售额最高的 5 个产品",
+  "db_id": "mysql_demo",
+  "database_url": "mysql+pymysql://nl2sql:nl2sql@127.0.0.1:3306/demo",
+  "llm": {"model": "deepseek-v4-pro", "api_key": "sk-xxx", "base_url": "https://api.deepseek.com/v1"}
+}
 ```
 
 ## 多数据库支持
 
-| 方言 | 连接串 |
-|------|--------|
-| SQLite | `sqlite:///./data/demo.db` |
-| PostgreSQL | `postgresql://user:pass@localhost:5432/demo` |
-| MySQL | `mysql+pymysql://user:pass@localhost:3306/demo` |
+| 方言 | 连接串 | 状态 |
+|------|--------|------|
+| SQLite | `sqlite:///./data/demo.db` | 内置 BIRD 11 库 |
+| MySQL | `mysql+pymysql://user:pass@localhost:3306/demo` | 用户 JSON |
+| PostgreSQL | `postgresql+psycopg2://user:pass@host:5432/demo` | 用户 JSON |
 
-从连接串自动识别方言，注入 LLM prompt 规则并切换 AST 校验方言。
+从连接串自动识别方言，注入对应 Few-shot 示例（`corpus/bird_fewshot/mysql.md`、`postgresql.md`），切换 AST 校验方言，适配错误分类规则。
 
 ## BIRD Mini-Dev 评测结果
 
@@ -140,12 +186,12 @@ python scripts/_precompute_gold.py
 
 | 层 | 选型 |
 |----|------|
-| LLM | DeepSeek API |
+| LLM | DeepSeek / OpenAI / Claude |
 | Embedding | BAAI/bge-small-zh-v1.5（本地） |
 | 向量库 | ChromaDB |
 | 编排 | LangGraph + LangChain |
 | 数据库 | SQLite / PostgreSQL / MySQL |
-| AST 校验 | sqlglot |
+| AST 校验 | sqlglot（自动检测方言） |
 | API | FastAPI + Pydantic |
 | 缓存 | Redis |
 | 前端 | Streamlit |
@@ -156,6 +202,7 @@ python scripts/_precompute_gold.py
 |------|--------|
 | `LLM_BASE_URL` | `https://api.deepseek.com/v1` |
 | `LLM_CHAT_MODEL` | `deepseek-v4-pro` |
-| `SQL_DIALECT` | `sqlite` |
+| `LLM_API_KEY` | （从 llm_keys.json 或环境变量读取） |
 | `DATABASE_URL` | `sqlite:///./data/demo.db` |
 | `REDIS_URL` | `redis://localhost:6379/0` |
+| `EMBED_MODEL_NAME` | `BAAI/bge-small-zh-v1.5` |

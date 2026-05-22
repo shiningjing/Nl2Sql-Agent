@@ -14,17 +14,35 @@ from src.api.models import (
     ExecResult,
 )
 from src.infrastructure.redis_cache import cache_get_llm, cache_set_llm
+from src.infrastructure.llm_factory import set_llm_config, clear_llm_config
 from src.obs.logger import TraceLogger
 from nl2sql.execute import execute_sql
 
 router = APIRouter()
 
 
+def _apply_llm_config(llm) -> None:
+    """Set per-request LLM config from request model. No-op if llm is None or all fields are None."""
+    if llm and any((llm.model, llm.api_key, llm.base_url)):
+        set_llm_config(
+            model=llm.model,
+            api_key=llm.api_key,
+            base_url=llm.base_url or "",
+        )
+
+
 def _sanitize_exec_result(er: dict) -> dict:
-    """Convert SQLAlchemy Row objects in exec result data to plain tuples."""
+    """Convert SQLAlchemy Row objects + Decimal types to JSON-safe plain types."""
+    from decimal import Decimal
+
+    def _safe(v):
+        if isinstance(v, Decimal):
+            return float(v)
+        return v
+
     data = er.get("data")
     if data:
-        er = {**er, "data": [tuple(row) for row in data]}
+        er = {**er, "data": [tuple(_safe(v) for v in row) for row in data]}
     return er
 
 
@@ -46,6 +64,7 @@ def _get_tlog(request: Request) -> TraceLogger:
 def query_nl2sql(req: QueryRequest, request: Request):
     """Mini pipeline: RAG → Generator → Reviewer → Executor → Self-Correction."""
     tlog = _get_tlog(request)
+    _apply_llm_config(req.llm)
     start = time.time()
 
     # ── Check cache ──
@@ -119,6 +138,7 @@ def query_nl2sql(req: QueryRequest, request: Request):
 def query_full_graph(req: QueryFullRequest, request: Request):
     """Full Graph pipeline: Router → SchemaRetriever → Decomposer → Generator → Guard → Voter → Executor."""
     tlog = _get_tlog(request)
+    _apply_llm_config(req.llm)
     start = time.time()
 
     # ── Check cache ──
@@ -266,6 +286,8 @@ async def query_full_graph_stream(req: QueryFullRequest, request: Request):
             return cb
 
         def run_graph():
+            # Set LLM config inside thread (contextvars don't cross thread-pool boundary)
+            _apply_llm_config(req.llm)
             # Set token callback inside the graph thread so generator_node can pick it up
             import src.agent.nodes.generator as gen_mod
             gen_mod.set_token_callback(make_token_callback())
@@ -282,6 +304,7 @@ async def query_full_graph_stream(req: QueryFullRequest, request: Request):
                 asyncio.run_coroutine_threadsafe(queue.put(("error", str(e))), loop)
             finally:
                 gen_mod.set_token_callback(None)
+                clear_llm_config()
 
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         executor.submit(run_graph)

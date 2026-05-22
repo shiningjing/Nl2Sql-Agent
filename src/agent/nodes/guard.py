@@ -45,6 +45,7 @@ def _check_hallucinations(sql: str, schema_text: str, database_url: str | None =
 
     sql_clean = re.sub(r"'.*?'", "'...'", sql)
     sql_clean = re.sub(r"`(\w+)`", r"\1", sql_clean)
+    sql_clean = re.sub(r'"[^"]*"', '', sql_clean)          # strip double-quoted identifiers (SQLite/PG)
     sql_clean = re.sub(r"--[^\n]*", "", sql_clean)          # strip single-line comments
     sql_clean = re.sub(r"/\*.*?\*/", "", sql_clean, flags=re.DOTALL)  # strip multi-line comments
     issues: list[dict] = []

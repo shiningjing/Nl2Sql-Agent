@@ -1,13 +1,19 @@
 """Few-shot Selector node — retrieves similar (Q, SQL) examples for Generator prompt."""
 from src.agent.state import AgentState
 from src.retrieval.fewshot_retrieve import retrieve_fewshot, retrieve_fewshot_for_db, format_fewshot
+from nl2sql.generate import get_dialect_from_url
 
 
 def fewshot_selector_node(state: AgentState) -> dict:
-    """Retrieve top-K similar Q-SQL examples and format for prompt injection."""
+    """Retrieve top-K similar Q-SQL examples and format for prompt injection.
+
+    Lookup order: db_id first (BIRD databases), then dialect (mysql/postgresql).
+    Falls back to generic retrieval if neither matches.
+    """
     question = state.get("question", "")
     enabled = state.get("fewshot_enabled", False)
     db_id = state.get("db_id", "")
+    database_url = state.get("database_url", "")
     complexity = state.get("complexity", "simple")
     k = 1 if complexity == "simple" else 3
 
@@ -20,12 +26,18 @@ def fewshot_selector_node(state: AgentState) -> dict:
             tlog.node_exit("fewshot_selector", {"example_count": 0, "skipped": True})
         return {"fewshot_text": ""}
 
+    items = []
     if db_id:
         items = retrieve_fewshot_for_db(question, db_id, k=k)
-    else:
+    if not items and database_url:
+        dialect = get_dialect_from_url(database_url)
+        if dialect and dialect != "sqlite":
+            items = retrieve_fewshot_for_db(question, dialect, k=k)
+    if not items:
         items = retrieve_fewshot(question, k=k)
+
     fewshot_text = format_fewshot(items) if items else ""
-    fewshot_hits = [item["source"] for item in items]
+    fewshot_hits = [item["source"] for item in items] if items else []
 
     if tlog:
         tlog.node_exit("fewshot_selector", {"example_count": len(items), "hits": fewshot_hits})

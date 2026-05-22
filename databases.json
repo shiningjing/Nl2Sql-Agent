@@ -1,0 +1,9 @@
+{
+  "_comment": "在此文件配置你自己的数据库连接，会自动出现在 Streamlit 数据库下拉框中。",
+  "_examples": [
+    {"db_id": "my_mysql",   "display_name": "我的 MySQL",    "database_url": "mysql+pymysql://用户名:密码@主机:3306/库名", "domain": "", "table_count": 0},
+    {"db_id": "my_pg",      "display_name": "我的 PostgreSQL", "database_url": "postgresql+psycopg2://用户名:密码@主机:5432/库名", "domain": "", "table_count": 0},
+    {"db_id": "my_sqlite",  "display_name": "我的 SQLite",   "database_url": "sqlite:///C:/path/to/database.db", "domain": "", "table_count": 0}
+  ],
+  "databases": []
+}

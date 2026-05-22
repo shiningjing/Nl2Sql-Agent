@@ -2,24 +2,16 @@
 import json
 import re
 
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from nl2sql.config import Config
 from src.agent.state import AgentState
+from src.infrastructure.llm_factory import get_llm
 
 from src.prompts import DECOMPOSER_SYSTEM_PROMPT as SYSTEM_PROMPT
 
 
 def _get_chat():
-    return ChatOpenAI(
-        model=Config.LLM_CHAT_MODEL,
-        api_key=Config.LLM_API_KEY,
-        base_url=Config.LLM_BASE_URL,
-        temperature=0,
-        request_timeout=45,
-        max_retries=0,
-    )
+    return get_llm(temperature=0, request_timeout=45, max_retries=0)
 
 
 def _extract_json(response: str) -> dict:

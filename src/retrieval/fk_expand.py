@@ -6,6 +6,14 @@ from nl2sql.schema import _get_cached_schema_info, get_sample_rows
 from nl2sql.config import Config
 from sqlalchemy.exc import NoSuchTableError
 
+
+def _get_dialect(database_url: str) -> str:
+    for prefix, d in [("postgresql", "postgresql"), ("mysql", "mysql")]:
+        if database_url and database_url.startswith(prefix):
+            return d
+    return "sqlite"
+
+
 _graph_cache: dict | None = None
 _graph_db_url: str | None = None
 _graph_lock = threading.Lock()
@@ -63,7 +71,7 @@ def build_ddl_for_tables(table_names: list[str], database_url: str | None = None
         return ""
 
     info = _get_cached_schema_info(database_url)
-    dialect = Config.SQL_DIALECT.upper()
+    dialect = _get_dialect(database_url)
     lines = [f"-- SQL Dialect: {dialect}\n"]
 
     for t in table_names:
