@@ -63,3 +63,28 @@ def _statement_kind(stmt) -> str:
     if hasattr(stmt, "key"):
         return str(stmt.key)
     return type(stmt).__name__
+
+
+def extract_table_names(sql: str, dialect: str = "sqlite") -> set[str]:
+    """Extract all real table names from a SQL query using sqlglot.
+
+    Filters out CTE aliases so only underlying physical tables are returned.
+    Returns lowercase names for case-insensitive comparison.
+    """
+    from sqlglot import exp
+
+    if not sql or not sql.strip():
+        return set()
+
+    try:
+        tree = sqlglot.parse_one(sql, read=dialect)
+    except Exception:
+        return set()
+
+    cte_aliases = {node.alias.lower() for node in tree.find_all(exp.CTE) if node.alias}
+    tables = set()
+    for node in tree.find_all(exp.Table):
+        name = node.name.lower() if node.name else ""
+        if name and name not in cte_aliases:
+            tables.add(name)
+    return tables

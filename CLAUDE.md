@@ -4,7 +4,7 @@
 
 自然语言 → SQL 端到端系统。LangGraph 状态机编排，Router → Schema Retriever → Decomposer → Generator → Guard → Voter → SemCheck → Refiner 循环。BIRD Mini-Dev（500 题，11 数据库，3 方言）消融评测。
 
-**BIRD 消融结果 (2026-05-21)**：
+**BIRD 消融结果 (2026-05-21，DeepSeek V4 Pro)**：
 
 | Config | EX | VES | 耗时 | 要点 |
 |--------|-----|-----|------|------|
@@ -13,9 +13,17 @@
 | R2_RAG | 34.6% | 0.506 | 5.06s | +RAG 最大跳跃 +11pp |
 | R3_MultiCandidate | 34.0% | 0.376 | 9.45s | +多候选（反降） |
 | R4_PruneFewshot | 37.4% | 0.353 | 10.75s | +列剪枝+Fewshot |
-| R5_Evidence | **38.8%** | 0.303 | 12.88s | BIRD 人工 evidence 天花板 |
+| R5_Evidence | 38.8% | 0.303 | 12.88s | BIRD 人工 evidence 天花板 |
 
-**核心发现**：RAG 是最大杠杆 (+11pp)；Decomposer 对 DeepSeek 几乎无效；MultiCandidate 不值得；Self-Correction 修复率 7-20% 是最大瓶颈。
+**最新结果 (2026-05-26，Claude Opus 4.7)**：
+
+| Config | EX | VES | 耗时 | 要点 |
+|--------|-----|-----|------|------|
+| R5_Evidence | **47.0%** | 0.789 | 63.15s | 换模型 + SemCheck prompt 重构，+8.2pp |
+
+RAG Table Recall 95.9%（473/500 样本），表检索不是瓶颈。
+
+**核心发现**：RAG 是最大杠杆 (+11pp)；Decomposer 对 DeepSeek 几乎无效；MultiCandidate 不值得；换更强模型 + SemCheck prompt 结构化可再提升 ~8pp；Self-Correction 修复率 7-20% 仍是瓶颈。
 
 ## 版本历史
 
@@ -112,13 +120,17 @@ nl2sql-mini-agent/
 
 ## LLM 多模型支持
 
-通过 Streamlit 侧边栏 Provider 下拉框切换，或 API 请求中传 `llm` 字段。预设了 4 个 Provider：
+通过 Streamlit 侧边栏 Provider 下拉框切换，或 API 请求中传 `llm` 字段。预设了 8 个 Provider：
 
 | Provider | Model | Base URL |
 |----------|-------|----------|
 | DeepSeek V4 Pro | deepseek-v4-pro | https://api.deepseek.com/v1 |
+| DeepSeek Chat | deepseek-chat | https://api.deepseek.com/v1 |
+| DeepSeek Reasoner | deepseek-reasoner | https://api.deepseek.com/v1 |
 | OpenAI GPT-4o | gpt-4o | https://api.openai.com/v1 |
+| OpenAI GPT-4o-mini | gpt-4o-mini | https://api.openai.com/v1 |
 | Claude Opus 4.7 | claude-opus-4-7 | https://api.anthropic.com |
+| Claude Sonnet 4.6 | claude-sonnet-4-6 | https://api.anthropic.com |
 | Custom | (任意) | (任意) |
 
 密钥统一存在 `llm_keys.json`（不提交 Git），格式：
@@ -194,11 +206,10 @@ python scripts/_precompute_gold.py
    - **已修复 (v0.2.1)**：双引号标识符（`"County Name"`）的 FP 误报 — 正则未 strip 导致内部单词被当成裸标识符
    - **方向**：加硬规则层（关键词→语法要求映射），如 "top N" → 检查是否有 ORDER BY
 
-3. **SemCheck FN 率高 (50-65%)** — 三个根因叠加：
-   - ① Prompt `Default to YES. Only say NO when you have CONCRETE evidence` 过于宽松
-   - ② `max_tokens=80` 无推理空间
-   - ③ 无 gold 参照，LLM 从零判断语义正确性能力不足
-   - **方向**：去 "default to YES" → 分步检查 prompt、max_tokens 提至 200-300
+3. **SemCheck FN 率高 (50-65%)** — 两个根因叠加：
+   - ① 无 gold 参照，LLM 从零判断语义正确性能力不足
+   - ② 即使 prompt 已重构为三步结构化评估 + max_tokens 提至 256，FN 率仍在 50% 左右
+   - **方向**：引入 gold 参照对比、加硬规则层（关键词→语法要求映射）
 
 4. **Generator 时间占比 50%+**：多候选时翻倍（2.5→6.0s），考虑 speculative decoding
 

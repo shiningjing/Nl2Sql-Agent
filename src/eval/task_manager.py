@@ -519,6 +519,14 @@ def _run_one_sample(case: dict, cfg: dict, database_url: str | None) -> dict:
     ex = match_info["ex"]
     v = ves_score(ex, match_info["gold_time_ms"], match_info["gen_time_ms"])
 
+    # ── RAG recall ──
+    from src.eval.metrics import compute_rag_recall
+    if use_full:
+        _rag_chunks = result_state.get("rag_chunks", [])
+    else:
+        _rag_chunks = result.get("rag_chunks", [])
+    rag_recall_info = compute_rag_recall(_rag_chunks, gold_sql)
+
     return {
         "id": qid,
         "question": question[:60],
@@ -536,6 +544,8 @@ def _run_one_sample(case: dict, cfg: dict, database_url: str | None) -> dict:
         "token_usage": tu,
         "gold_time_ms": round(match_info["gold_time_ms"], 2),
         "gen_time_ms": round(match_info["gen_time_ms"], 2),
+        "rag_recall": rag_recall_info["recall"] if rag_recall_info else None,
+        "rag_recall_detail": rag_recall_info,
     }
 
 

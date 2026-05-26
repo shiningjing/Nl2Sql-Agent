@@ -144,7 +144,7 @@ ROUTER_CLASSIFIER_PROMPT = (
 # Semantic Check — LLM binary YES/NO review (src/agent/nodes/semantic_check.py)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-SEMANTIC_CHECK_PROMPT = """You are a SQL reviewer. Check if the SQL correctly answers the user's question.
+SEMANTIC_CHECK_PROMPT = """You are a SQL reviewer. Check whether the SQL correctly answers the user's question, given the schema and execution result.
 
 ## SCHEMA (only tables referenced by the SQL)
 {schema_text}
@@ -160,22 +160,26 @@ The query returned {row_count} rows. Column headers: {columns}
 First {preview_rows} rows:
 {preview}
 
-## HOW TO JUDGE
-Default to YES. Only say NO when you have CONCRETE evidence of a mistake — not speculation.
-- If result is non-empty and column count/shape roughly matches what the question asks → YES.
-- If the SQL logic is correct even if suboptimal (extra LIMIT, minor redundancy) → YES.
-- Only flag real errors: wrong table, missing required filter, output is empty when question expects data, returns aggregation when question asks for individual records.
+## EVALUATION
 
-## Common pitfalls to check (flag ONLY if clearly wrong)
-- MISSING DISTINCT: question asks "which/list/names/different/unique" and SELECT lacks DISTINCT
-- MISSING ORDER BY+LIMIT: question asks "top/bottom/highest/lowest N" and query lacks ORDER BY
-- WRONG RESULT COLUMNS: output columns are clearly unrelated to what the question asks
-- EMPTY RESULT: row_count=0 but the question phrasing expects data to exist (e.g. "list the customers who...")
-- WRONG AGGREGATION LEVEL: question asks for records/items/details but query returns only a single aggregate number
-- WRONG FILTER: WHERE condition is logically opposite to what the question specifies
+### Step 1 — Structural match (quick check)
+- Does the SELECT clause produce columns that directly answer what the question asks?
+- Does the FROM/JOIN reference the right tables for the question's domain?
+- If the question asks for an aggregation (count, sum, avg, max, min), does the SQL have the appropriate aggregate function?
+- If the question asks for individual records/details, does the SQL return rows rather than a single aggregate?
+
+### Step 2 — Logic check (deeper)
+- Do the WHERE conditions match the filters described in the question? Check for opposite logic (e.g., question says "greater than" but SQL has "<").
+- If the question asks for "top/bottom/highest/lowest N", does the SQL have ORDER BY ... DESC/ASC + LIMIT?
+- If the question asks for "which/list/names/different/unique/ratio/percentage", check DISTINCT and aggregation level carefully.
+- If row_count=0 but the question expects data to exist, flag it — but only if you're confident the data should exist given the schema context.
+
+### Step 3 — Verdict
+- YES: The SQL and execution result are consistent with what the question asks. Minor issues (extra LIMIT, slightly verbose column names, suboptimal but correct logic) do NOT warrant a NO.
+- NO: There is clear, specific evidence of an error in the SQL logic, column selection, filters, or output format. You must be able to point to a concrete mismatch.
 
 Reply with exactly:
 YES
 NO: <one-line concrete reason>"""
 
-SEMANTIC_CHECK_SYSTEM_PROMPT = "Reply with YES or NO: <one-line reason>. Be concise."
+SEMANTIC_CHECK_SYSTEM_PROMPT = """You are a precise SQL reviewer. Your task is to verify whether a generated SQL query actually answers the user's question. Focus on concrete, provable errors — not style or minor inefficiencies. Answer only YES or NO with a brief reason."""

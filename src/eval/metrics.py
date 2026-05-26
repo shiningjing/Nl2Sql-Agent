@@ -105,6 +105,45 @@ def exec_match(sql_a: str, sql_b: str, database_url: str | None = None,
                 "gold_rows": gold_rows, "gen_rows": r_b["row_count"]}
 
 
+def extract_tables_from_rag_chunks(rag_chunks: list[dict]) -> set[str]:
+    """Extract unique table names from RAG chunk metadata."""
+    tables = set()
+    for c in rag_chunks:
+        if isinstance(c.get("metadata"), dict):
+            tn = c["metadata"].get("table_name", "")
+            if tn:
+                tables.add(tn.lower())
+    return tables
+
+
+def compute_rag_recall(rag_chunks: list[dict], gold_sql: str,
+                       dialect: str = "sqlite") -> dict | None:
+    """Compute RAG table recall = |tables_in_gold ∩ tables_in_rag| / |tables_in_gold|.
+
+    Returns None if RAG is off (empty chunks) or gold SQL has no tables.
+    """
+    from src.guardrails.ast_validator import extract_table_names
+
+    if not rag_chunks:
+        return None
+
+    gold_tables = extract_table_names(gold_sql, dialect=dialect)
+    if not gold_tables:
+        return None
+
+    rag_tables = extract_tables_from_rag_chunks(rag_chunks)
+    hit = gold_tables & rag_tables
+    missed = gold_tables - rag_tables
+
+    return {
+        "recall": round(len(hit) / len(gold_tables), 4),
+        "gold_tables": sorted(gold_tables),
+        "retrieved_tables": sorted(rag_tables),
+        "hit_tables": sorted(hit),
+        "missed_tables": sorted(missed),
+    }
+
+
 def ves_score(ex: bool, gold_time_ms: float, gen_time_ms: float) -> float:
     """BIRD VES: ex * sqrt(gold_time / gen_time). 0 if EX=0."""
     if not ex or gold_time_ms <= 0 or gen_time_ms <= 0:

@@ -344,6 +344,11 @@ def evaluate_bird_sample(sample, config: dict, knowledge_source: str, data_dir: 
         state.get("complexity") == "complex" and state.get("decomposer_enabled")
     )
 
+    # ── RAG recall ──
+    from src.eval.metrics import compute_rag_recall
+    rag_chunks = state.get("rag_chunks", [])
+    rag_recall_info = compute_rag_recall(rag_chunks, sample.gold_sql)
+
     return {
         "question_id": sample.question_id,
         "db_id": sample.db_id,
@@ -376,6 +381,9 @@ def evaluate_bird_sample(sample, config: dict, knowledge_source: str, data_dir: 
         "candidate_count": len(state.get("candidate_sqls", [])),
         "decomposer_used": decomposer_used,
         "sub_question_count": len(state.get("sub_questions", [])),
+        # ── RAG recall ──
+        "rag_recall": rag_recall_info["recall"] if rag_recall_info else None,
+        "rag_recall_detail": rag_recall_info,
     }
 
 
@@ -551,6 +559,9 @@ def run_bird_eval(
                                                 "tokens": 0, "time": 0.0})
         # Router tracking (Full Graph only)
         router_traces: list[dict] = []
+        # RAG recall aggregation (only for configs with RAG enabled)
+        rag_recall_sum = 0.0
+        rag_recall_count = 0
         timeout_log: list[dict] = []  # per-timeout events for post-mortem
         MAX_SAMPLE_RETRIES = 2
         # Progressive hard timeout per sample attempt: tight → loose → loosest
@@ -625,6 +636,7 @@ def run_bird_eval(
                                 "semantic_pass": None, "semantic_feedback": "", "sem_reject_count": 0,
                                 "retry_count": 0, "candidate_count": 0,
                                 "decomposer_used": False, "sub_question_count": 0,
+                                "rag_recall": None, "rag_recall_detail": None,
                             }
                     completed += 1
                     elapsed = r["elapsed_s"]
@@ -645,6 +657,9 @@ def run_bird_eval(
                     diff_stats[d]["tokens"] += tu.get("total", 0)
                     diff_stats[d]["time"] += elapsed
                     case_results.append(r)
+                    if r.get("rag_recall") is not None:
+                        rag_recall_sum += r["rag_recall"]
+                        rag_recall_count += 1
                     if r.get("router_score") is not None:
                         router_traces.append({
                             "question_id": r["question_id"],
@@ -704,6 +719,7 @@ def run_bird_eval(
                             "semantic_pass": None, "semantic_feedback": "", "sem_reject_count": 0,
                             "retry_count": 0, "candidate_count": 0,
                             "decomposer_used": False, "sub_question_count": 0,
+                            "rag_recall": None, "rag_recall_detail": None,
                         }
                         completed += 1
                         d = r.get("difficulty", "?")
@@ -780,6 +796,7 @@ def run_bird_eval(
         if timeout_log:
             _write_timeout_log(timeout_log, cfg_name, cfg_knowledge)
 
+        avg_rag_recall = round(rag_recall_sum / rag_recall_count, 4) if rag_recall_count else None
         all_results[cfg_name] = {
             "config": cfg,
             "knowledge_source": cfg_knowledge,
@@ -797,12 +814,16 @@ def run_bird_eval(
             "diff_summary": diff_summary,
             "router_traces": router_traces,
             "pipeline_stats": pipeline_stats,
+            "avg_rag_recall": avg_rag_recall,
+            "rag_recall_samples": rag_recall_count,
         }
 
         ex_pct = all_results[cfg_name]["ex_rate"]
         tps = all_results[cfg_name]["tokens_per_s"]
         crash_note = f"  |  Crashed: {crashed}" if crashed else ""
         print(f"\n  EX: {passed}/{n} = {ex_pct:.1%}  |  VES: {all_results[cfg_name]['avg_ves']:.4f}  |  avg {total_time/n:.1f}s/q  |  avg {avg_tok} tok/q  |  {tps:.0f} tok/s{crash_note}")
+        if avg_rag_recall is not None:
+            print(f"  RAG Table Recall: {avg_rag_recall:.1%} ({rag_recall_count}/{n} samples)")
 
         # ── Print pipeline summary (compact) ──
         g = pipeline_stats.get("guard", {})
@@ -1011,6 +1032,18 @@ def _write_pipeline_md(f, results: dict, config_names: list[str]):
             vals = [f"{nt.get(n, 0):.1f}s" for n in sorted_nodes]
             f.write(f"| {name} | " + " | ".join(vals) + " |\n")
 
+    # ── RAG Table Recall ──
+    has_rag_recall = any(results[n].get("avg_rag_recall") is not None for n in config_names)
+    if has_rag_recall:
+        f.write("\n## RAG Table Recall\n\n")
+        f.write("| Config | Samples | Avg Recall |\n")
+        f.write("|--------|---------|------------|\n")
+        for name in config_names:
+            r = results[name]
+            rr = r.get("avg_rag_recall")
+            if rr is not None:
+                f.write(f"| {name} | {r.get('rag_recall_samples', 0)} | {rr:.1%} |\n")
+
 
 def write_bird_report(results: dict, cost: dict, output_dir: str, experiment: str = "") -> str:
     """Write summary.json, summary.md, cost_report.json."""
@@ -1053,6 +1086,8 @@ def write_bird_report(results: dict, cost: dict, output_dir: str, experiment: st
             "diff_summary": r["diff_summary"],
             "router_distribution": router_dist,
             "pipeline_stats": r.get("pipeline_stats", {}),
+            "avg_rag_recall": r.get("avg_rag_recall"),
+            "rag_recall_samples": r.get("rag_recall_samples", 0),
         }
 
     with open(os.path.join(output_dir, f"bird_{experiment}_{ts}_summary.json"), "w", encoding="utf-8") as f:
@@ -1070,15 +1105,17 @@ def write_bird_report(results: dict, cost: dict, output_dir: str, experiment: st
         f.write(f"**Samples**: {n_total}\n\n")
 
         f.write("## Overall\n\n")
-        f.write("| Config | EX | VES | Passed | Crashed | Avg Time | Avg Tokens | Tok/s |\n")
-        f.write("|--------|-----|-----|--------|---------|----------|------------|-------|\n")
+        f.write("| Config | EX | VES | Passed | Crashed | Avg Time | Avg Tokens | Tok/s | RAG Recall |\n")
+        f.write("|--------|-----|-----|--------|---------|----------|------------|-------|------------|\n")
         for name in config_names:
             r = results[name]
             cr = r.get("crashed", 0)
             cr_str = f"⚠{cr}" if cr else "0"
+            rr = r.get("avg_rag_recall")
+            rr_str = f"{rr:.1%} ({r.get('rag_recall_samples', 0)})" if rr is not None else "-"
             f.write(f"| {name} | {r['ex_rate']:.1%} | {r['avg_ves']:.4f} | "
                     f"{r['passed']}/{r['total']} | {cr_str} | {r['avg_time_s']}s | "
-                    f"{r['avg_tokens']} | {r['tokens_per_s']:.0f} |\n")
+                    f"{r['avg_tokens']} | {r['tokens_per_s']:.0f} | {rr_str} |\n")
 
         f.write("\n## EX by Difficulty\n\n")
         f.write("| Config | Simple | Moderate | Challenging |\n")
@@ -1267,6 +1304,11 @@ def main():
         print(f"Estimated tokens: ~{fp['estimated_tokens']:,}")
         print(f"Estimated cost: ${fp['estimated_cost_usd_best']:.2f} (best) / ${fp['estimated_cost_usd_with_retries']:.2f} (with retries)")
         print(f"Report: {report_path}")
+
+        # Force exit to work around non-daemon threads (SQLAlchemy pools,
+        # ThreadPoolExecutor workers, ChromaDB) that block clean shutdown.
+        import os as _os
+        _os._exit(0)
 
     elif args.exp == "ablation":
         # Pre-init BIRD RAG collection in main thread (ChromaDB is not thread-safe for init)

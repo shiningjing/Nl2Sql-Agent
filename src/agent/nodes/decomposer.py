@@ -6,6 +6,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 from src.agent.state import AgentState
 from src.infrastructure.llm_factory import get_llm
+from nl2sql.config import Config
 
 from src.prompts import DECOMPOSER_SYSTEM_PROMPT as SYSTEM_PROMPT
 
