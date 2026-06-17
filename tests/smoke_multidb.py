@@ -6,9 +6,12 @@ from agent.graphs.full_graph import create_full_graph
 from agent.state import AgentState
 from agent.llm_factory import set_llm_config, clear_llm_config
 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BIRD_BASE = os.path.join(PROJECT_ROOT, "data", "bird", "mini_dev_data", "minidev", "MINIDEV", "dev_databases")
+
 CASES = [
     # SQLite (BIRD)
-    {"db": "california_schools", "url": "sqlite:///F:/Experience/nl2sql-mini-agent/data/bird/mini_dev_data/minidev/MINIDEV/dev_databases/california_schools/california_schools.sqlite",
+    {"db": "california_schools", "url": f"sqlite:///{BIRD_BASE}/california_schools/california_schools.sqlite",
      "questions": [
          "How many schools are there?",
          "What is the average FRPM count by county?",
