@@ -4,9 +4,9 @@ warnings.filterwarnings("ignore")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dotenv import load_dotenv; load_dotenv()
 
-from src.eval.bird_loader import load_bird_dev, get_database_url
-from src.eval.metrics import exec_match
-from src.agent.graphs.full_graph import create_full_graph
+from evaluation.bird_loader import load_bird_dev, get_database_url
+from evaluation.metrics import exec_match
+from agent.graphs.full_graph import create_full_graph
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
 random.seed(123)

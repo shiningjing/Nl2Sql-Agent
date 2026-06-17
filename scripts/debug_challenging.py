@@ -10,8 +10,8 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _PROJECT_ROOT)
 os.chdir(_PROJECT_ROOT)  # CRITICAL: ChromaDB uses relative path ./.chroma
 
-from src.eval.bird_loader import load_bird_dev, get_database_url
-from src.agent.graphs.full_graph import create_full_graph
+from evaluation.bird_loader import load_bird_dev, get_database_url
+from agent.graphs.full_graph import create_full_graph
 
 # Only log warnings and above (reduce noise)
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s [%(name)s] %(levelname)s: %(message)s')

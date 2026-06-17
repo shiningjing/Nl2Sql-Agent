@@ -8,9 +8,9 @@ warnings.filterwarnings("ignore", message=".*allowed_objects.*")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.eval.bird_loader import load_bird_dev, get_database_url
-from src.agent.graphs.full_graph import create_full_graph
-from nl2sql.config import Config
+from evaluation.bird_loader import load_bird_dev, get_database_url
+from agent.graphs.full_graph import create_full_graph
+from storage.config import Config
 
 # Pick 5 codebase_community samples
 TARGET_IDS = ["701"]

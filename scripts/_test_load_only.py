@@ -6,7 +6,7 @@ warnings.filterwarnings("ignore")
 
 print("Importing bird_loader...")
 t0 = time.time()
-from src.eval.bird_loader import get_database_url, load_bird_dev
+from evaluation.bird_loader import get_database_url, load_bird_dev
 print(f"  import done in {time.time()-t0:.1f}s")
 
 print("Loading samples...")

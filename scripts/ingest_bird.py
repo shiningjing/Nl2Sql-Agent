@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import chromadb
 from chromadb.utils import embedding_functions
-from nl2sql.config import Config
+from storage.config import Config
 
 
 def _default_data_dir() -> str:

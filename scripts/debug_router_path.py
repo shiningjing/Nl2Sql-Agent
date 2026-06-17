@@ -2,9 +2,9 @@
 import json, os, sys, time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.agent.graphs.full_graph import create_full_graph
-from src.agent.nodes.router import _heuristic_score
-from src.eval.bird_loader import load_bird_dev, get_database_url
+from agent.graphs.full_graph import create_full_graph
+from agent.nodes.router import _heuristic_score
+from evaluation.bird_loader import load_bird_dev, get_database_url
 
 # ── Select test questions ──
 TEST_CASES = [

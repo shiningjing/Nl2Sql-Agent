@@ -13,10 +13,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import defaultdict
 from datetime import datetime
-from src.eval.bird_loader import load_bird_dev, get_database_url
-from src.eval.metrics import exec_match
-from src.agent.graphs.full_graph import create_full_graph
-from src.obs.logger import TraceLogger
+from evaluation.bird_loader import load_bird_dev, get_database_url
+from evaluation.metrics import exec_match
+from agent.graphs.full_graph import create_full_graph
+from observability.logger import TraceLogger
 
 
 # ── Per-sample runner with split timing ──────────────────────────────────────

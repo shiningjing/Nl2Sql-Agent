@@ -4,7 +4,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import warnings
 warnings.filterwarnings("ignore")
 
-from src.eval.bird_loader import get_database_url, load_bird_dev
+from evaluation.bird_loader import get_database_url, load_bird_dev
 
 samples = load_bird_dev()
 s701 = next(s for s in samples if s.question_id == "701")
@@ -21,7 +21,7 @@ gen = (
 
 # Only import execute_sql now (after bird_loader is done)
 print("Importing execute_sql...")
-from nl2sql.execute import execute_sql
+from tools.sql_executor import execute_sql
 print("  done")
 
 print("Exec gen_sql...")

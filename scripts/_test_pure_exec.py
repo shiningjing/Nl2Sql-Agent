@@ -34,7 +34,7 @@ print()
 
 # ── Now import and test execute_sql ──
 print("Importing execute_sql...")
-from nl2sql.execute import execute_sql
+from tools.sql_executor import execute_sql
 print("  done")
 print()
 

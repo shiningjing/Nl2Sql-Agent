@@ -5,8 +5,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dotenv import load_dotenv; load_dotenv()
 
 from sqlalchemy import create_engine, text
-from src.eval.bird_loader import load_bird_dev, get_database_url
-from src.agent.graphs.full_graph import create_full_graph
+from evaluation.bird_loader import load_bird_dev, get_database_url
+from agent.graphs.full_graph import create_full_graph
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
 s = next(x for x in load_bird_dev() if x.question_id == "701")

@@ -9,7 +9,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.retrieval.fewshot_retrieve import load_fewshot_corpus, ingest_fewshot_chunks, get_fewshot_count
+from retrieval.fewshot_retrieve import load_fewshot_corpus, ingest_fewshot_chunks, get_fewshot_count
 
 
 def load_bird_fewshot(corpus_dir: str) -> list[dict]:

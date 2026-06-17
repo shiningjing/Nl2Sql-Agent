@@ -6,9 +6,9 @@ import os, sys, json, time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from collections import defaultdict
-from src.agent.graphs.full_graph import create_full_graph
-from src.eval.bird_loader import load_bird_dev, get_database_url
-from nl2sql.execute import execute_sql
+from agent.graphs.full_graph import create_full_graph
+from evaluation.bird_loader import load_bird_dev, get_database_url
+from tools.sql_executor import execute_sql
 
 # ── 选样：小/中/大 各 2 DB，每 DB 3 题 ──
 DB_TIERS = {

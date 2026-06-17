@@ -25,7 +25,7 @@ print(f"Path exists: {os.path.exists(db_path)}")
 print()
 
 print("Importing execute_sql...")
-from nl2sql.execute import execute_sql
+from tools.sql_executor import execute_sql
 print("  done")
 
 gen = "WITH influential_user AS(SELECT Id FROM users ORDER BY Reputation DESC LIMIT 1),user_posts AS(SELECT Score FROM posts WHERE OwnerUserId=(SELECT Id FROM influential_user))SELECT ROUND(100.0*SUM(CASE WHEN Score>50 THEN 1 ELSE 0 END)/COUNT(*),2)AS pct FROM user_posts LIMIT 200"

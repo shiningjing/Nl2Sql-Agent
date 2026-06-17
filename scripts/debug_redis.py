@@ -4,7 +4,7 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _PROJECT_ROOT)
 os.chdir(_PROJECT_ROOT)
 
-from src.infrastructure.redis_cache import get_redis, cache_get_llm, cache_set_llm
+from storage.redis_cache import get_redis, cache_get_llm, cache_set_llm
 
 # 1. Connection
 r = get_redis()

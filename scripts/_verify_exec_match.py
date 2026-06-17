@@ -4,8 +4,8 @@ warnings.filterwarnings("ignore")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dotenv import load_dotenv; load_dotenv()
 
-from src.eval.bird_loader import load_bird_dev, get_database_url
-from src.eval.metrics import exec_match
+from evaluation.bird_loader import load_bird_dev, get_database_url
+from evaluation.metrics import exec_match
 
 random.seed(42)
 samples = load_bird_dev()
