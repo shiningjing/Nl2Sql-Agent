@@ -1,237 +1,154 @@
-# CLAUDE.md — NL2SQL Agent v0.2.1
+# CLAUDE.md — NL2SQL Agent v0.2.1 → DataAgentOps
 
 ## 项目概览
 
-自然语言 → SQL 端到端系统。LangGraph 状态机编排，Router → Schema Retriever → Decomposer → Generator → Guard → Voter → SemCheck → Refiner 循环。BIRD Mini-Dev（500 题，11 数据库，3 方言）消融评测。
+自然语言 → SQL 端到端系统。LangGraph 状态机编排（Router → Schema Retriever → Decomposer → Generator → Guard → Voter → SemCheck → Refiner）。BIRD Mini-Dev（500 题，11 DB，3 方言）消融评测。
 
-**BIRD 消融结果 (2026-05-21，DeepSeek V4 Pro)**：
+**BIRD 结果**：DeepSeek V4 Pro（日常）EX **38.8%** / Claude Opus 4.7 EX **47.0%**。RAG Table Recall 95.9%。
 
-| Config | EX | VES | 耗时 | 要点 |
-|--------|-----|-----|------|------|
-| R0_Baseline | 23.4% | 0.334 | 6.98s | 裸 Generator |
-| R1_Decomposer | 23.8% | 0.374 | 5.80s | +拆解（净负收益） |
-| R2_RAG | 34.6% | 0.506 | 5.06s | +RAG 最大跳跃 +11pp |
-| R3_MultiCandidate | 34.0% | 0.376 | 9.45s | +多候选（反降） |
-| R4_PruneFewshot | 37.4% | 0.353 | 10.75s | +列剪枝+Fewshot |
-| R5_Evidence | 38.8% | 0.303 | 12.88s | BIRD 人工 evidence 天花板 |
+**核心发现**：RAG 最大杠杆 (+11pp)；Decomposer 对 DeepSeek 无效；换强模型 +8pp；Self-Correction 修复率 7-20% 仍是瓶颈。
 
-**最新结果 (2026-05-26，Claude Opus 4.7)**：
+## DataAgentOps 升级计划（2026-06 启动，4 周）
 
-| Config | EX | VES | 耗时 | 要点 |
-|--------|-----|-----|------|------|
-| R5_Evidence | **47.0%** | 0.789 | 63.15s | 换模型 + SemCheck prompt 重构，+8.2pp |
+> 详细计划文档：`docs/DataAgentOps升级计划.md`
 
-RAG Table Recall 95.9%（473/500 样本），表检索不是瓶颈。
+**目标**：从单体应用提升为可观测、可评测、可扩展、可部署的 Data Agent 平台。不以提精度为首要目标，BIRD EX 不低于 DeepSeek 基线（38.8%）。
 
-**核心发现**：RAG 是最大杠杆 (+11pp)；Decomposer 对 DeepSeek 几乎无效；MultiCandidate 不值得；换更强模型 + SemCheck prompt 结构化可再提升 ~8pp；Self-Correction 修复率 7-20% 仍是瓶颈。
+### 目标架构
 
-## 版本历史
+```
+Web UI / API Client → FastAPI Gateway ──SSE──→ Kafka → LangGraph Agent Worker
+                                                              │
+                                                      MCP Tool Layer
+                                                              │
+                                              Schema Service / SQL Validator
+                                              SQL Executor / Domain Knowledge
+                                                              │
+                                              PostgreSQL / ChromaDB / Redis
 
-- **v0.1.0** (W1-W8): Mini 闭环 + LangGraph + BIRD 评测基础设施
-- **v0.2.0** (后 BIRD 优化): 34 项修复（并发安全、Prompt 优化、Gold Cache、超时治理），R0→R5 完整消融数据
-- **v0.2.1** (2026-05-22): 多模型支持（DeepSeek/OpenAI/Claude）、MySQL/PG 全链路适配、用户数据库导入、多方言 Few-shot、Guard 双引号修复、Decimal 序列化修复
+OpenTelemetry → Tracing / Metrics / Logs
+```
+
+### 四周安排
+
+| 周次 | 主题 | 核心交付 |
+|------|------|----------|
+| W1 | 重构 + AgentOps 基础 | 模块化拆分、统一 AgentState、OpenTelemetry 全链路 tracing、BIRD 自动评测脚本 |
+| W2 | MCP 工具化 + 安全 | 7 个 MCP 工具、LangGraph 节点改为 MCP 调用、SQL 安全层（9 规则）、统一错误分类 |
+| W3 | 异步任务 + SSE | Kafka (4 Topic) + Redis 任务状态机、SSE 流式接口、重试/幂等/超时/取消 |
+| W4 | 部署 + 压测 + 文档 | Docker Compose 一键启动、K8s 部署、三类压测（功能/性能/稳定性）、简历材料 |
+
+### 优先级
+
+- **P0**：模块化重构、自动评测、OTel tracing、MCP 工具层、SQL 安全、Kafka 异步、Redis 状态、SSE、Docker Compose、README
+- **P1**：K8s、Dead-letter queue、任务取消、prompt 版本管理、失败回放、Grafana
+- **P2**：Go 工具网关、gRPC、多租户、自动扩缩容、混合检索、成本治理
+
+### Go 技术栈切入点
+
+- **MCP Server 用 Go 写**（推荐 P0/P1）：`database/sql` 连接池管理、`vitess/sqlparser` AST 校验、`mark3labs/mcp-go` SDK，与 Python Agent 通过 MCP 协议解耦
+- **API 网关**：Go `go-chi`/`grpc-gateway` 做限流、鉴权、协议转换
+- **Schema 缓存服务**：Go 常驻内存缓存 + gRPC，替代 Python `lru_cache`
 
 ## 技术栈
 
-| 层 | 选型 |
-|----|------|
-| LLM | DeepSeek / OpenAI / Claude (ChatOpenAI + ChatAnthropic) |
-| Embedding | BAAI/bge-small-zh-v1.5 (sentence-transformers, 本地) |
-| 向量库 | ChromaDB 本地持久化 |
-| 编排 | LangGraph + LangChain 1.2+ |
-| DB | SQLite / PostgreSQL / MySQL (SQLAlchemy 2.0) |
-| AST 校验 | sqlglot (自动检测方言) |
-| 接口 | FastAPI + Streamlit |
-| 缓存 | Redis (LLM 语义缓存，本地优先 → Docker 自动回退) |
+| 层 | 当前 | 升级后新增 |
+|----|------|-----------|
+| LLM | DeepSeek / OpenAI / Claude | — |
+| Embedding | BAAI/bge-small-zh-v1.5 (本地) | — |
+| 向量库 | ChromaDB 本地 | — |
+| 编排 | LangGraph + LangChain 1.2+ | — |
+| DB | SQLite / PG / MySQL (SQLAlchemy 2.0) | — |
+| AST | sqlglot | + vitess/sqlparser (Go MCP) |
+| 接口 | FastAPI + Streamlit | + SSE 流式 |
+| 缓存 | Redis (本地优先) | + Redis 任务状态 |
+| 消息 | — | + Kafka |
+| 可观测 | TraceLogger (jsonl) | + OpenTelemetry |
+| 工具 | — | + MCP 协议 |
+| 部署 | Docker Compose | + K8s |
+| 网关 | — | + Go (P1) |
 
 ## 关键约束
 
-1. SQL 只允许 SELECT（含 WITH），其他 DML/DDL 一律拒绝
-2. 所有 Schema 消费者统一走 `_get_cached_schema_info()`（`nl2sql/schema.py`），禁止 raw `inspect()`
-3. Generator temperature=0（确定性），多候选用 0/0.3/0.6 + 去重早停
+1. SQL 只允许 SELECT（含 WITH），DML/DDL 一律拒绝
+2. Schema 消费者统一走 `_get_cached_schema_info()`，禁止 raw `inspect()`
+3. Generator temperature=0；多候选 0/0.3/0.6 + 去重早停
 4. LIMIT 默认 200，硬上限 1000
-5. SQLite DB 连接自动 `PRAGMA journal_mode=WAL`（并发 SELECT 不排队）
-6. ThreadPoolExecutor 超时后用 `pool.shutdown(wait=False)` 防卡死
-7. 所有 prompt 统一定义在 `src/prompts.py`
+5. SQLite 自动 `PRAGMA journal_mode=WAL`
+6. ThreadPoolExecutor 超时后 `pool.shutdown(wait=False)`
+7. 所有 prompt 在 `src/prompts.py`
 
 ## 项目结构
 
 ```
 nl2sql-mini-agent/
-  nl2sql/                  # 核心库
-    schema.py              # Schema 反射 + 缓存 + get_engine（WAL 仅 SQLite）
-    execute.py             # SQL 执行沙箱
-    generate.py            # Generator + get_dialect_from_url()
-    db_registry.py         # 数据库注册中心（BIRD + Docker + 用户 JSON）
-    rag_retrieve.py        # ChromaDB 检索
-    pipeline.py            # 错误分类（11 种模式，3 方言）
-    config.py              # LLM_PRESETS + llm_keys.json 读写
-    review.py              # Review prompt（动态方言）
+  nl2sql/                  # 核心库 (schema, execute, generate, db_registry, rag_retrieve, config, review)
   src/
-    agent/
+    agent/                 # LangGraph 节点 (router, schema_retriever, decomposer, generator, guard, voter, executor, semantic_check, refiner)
       state.py             # AgentState TypedDict
-      graphs/full_graph.py # LangGraph 主图（条件边+循环）
-      nodes/
-        router.py, schema_retriever.py, decomposer.py
-        fewshot_selector.py, generator.py, guard.py
-        voter.py, executor.py, semantic_check.py, refiner.py
-    eval/
-      bird_loader.py       # BIRD 数据加载 + DB URL
-      metrics.py           # exec_match, VES, normalize_rows
-      task_manager.py      # 异步评测编排
-    prompts.py             # 所有 LLM prompt 常量
-    retrieval/             # RAG 检索管线（fk_expand, column_prune, fewshot）
-    api/                   # FastAPI 接口（/api/v1/query, /query/full, /query/full/stream）
-    infrastructure/        # Redis 语义缓存（本地优先 + Docker 回退）+ LLM 工厂
-    obs/                   # TraceLogger 结构化日志
-    guardrails/            # AST 校验 (sqlglot)
+      graphs/full_graph.py # 主图（条件边+循环）
+    eval/                  # BIRD 评测 (bird_loader, metrics, task_manager)
+    prompts.py             # 所有 LLM prompt
+    retrieval/             # RAG 管线 (fk_expand, column_prune, fewshot)
+    api/                   # FastAPI
+    infrastructure/        # Redis 缓存 + LLM 工厂
+    obs/                   # TraceLogger
+    guardrails/            # sqlglot AST 校验
   corpus/bird_fewshot/     # Few-shot 示例（按 db_id + 方言）
-    mysql.md               # MySQL 方言示例（7 对）
-    postgresql.md          # PostgreSQL 方言示例（7 对）
-    california_schools.md  # BIRD 数据库示例（11 个）
-    ...
   scripts/
-    eval_bird.py           # 主评测脚本（--test / --exp ablation）
+    eval_bird.py           # 主评测（--test / --exp ablation）
     _precompute_gold.py    # Gold SQL 预计算缓存
-    _smoke_multidb.py      # 多数据库冒烟测试（9 题 × 3 方言）
-    _show_demo_tables.py   # Demo 数据库表结构查看
+    _smoke_multidb.py      # 多数据库冒烟测试
     ingest_bird.py         # BIRD schema 向量化
-  reports/
-    .gold_cache/           # Gold SQL 预计算结果（JSON, 按 DB 分文件）
-    bird_ablation_*_summary.{md,json}  # 消融报告
-    checkpoint_ablation.json          # 断点续跑
-  logs/traces/             # 流式 trace (jsonl, 即时 fsync)
+  reports/.gold_cache/     # Gold SQL 预计算结果
+  logs/traces/             # 流式 trace (jsonl)
   data/bird/mini_dev_data/ # BIRD Mini-Dev 数据集
   llm_keys.json            # LLM 密钥（不提交 Git）
   databases.json           # 用户自定义数据库连接
 ```
 
-## 环境变量
+## LLM 预设 (8 个)
 
-| 变量 | 默认值 |
-|------|--------|
-| LLM_BASE_URL | https://api.deepseek.com/v1 |
-| LLM_CHAT_MODEL | deepseek-v4-pro |
-| LLM_API_KEY | (从 llm_keys.json 或环境变量读取) |
-| SQL_DIALECT | sqlite（已弃用，现在从 database_url 自动推导） |
-| DATABASE_URL | sqlite:///./data/demo.db |
-| EMBED_MODEL_NAME | BAAI/bge-small-zh-v1.5 |
-| REDIS_URL | redis://localhost:6379/0 |
+密钥在 `llm_keys.json`：`{"deepseek": "", "openai": "", "anthropic": ""}`。自动检测 Anthropic URL/Model 映射到 `ChatAnthropic`。
 
-## LLM 多模型支持
+| Provider | Model |
+|----------|-------|
+| DeepSeek V4 Pro / Chat / Reasoner | deepseek-v4-pro / deepseek-chat / deepseek-reasoner |
+| OpenAI GPT-4o / GPT-4o-mini | gpt-4o / gpt-4o-mini |
+| Claude Opus 4.7 / Sonnet 4.6 | claude-opus-4-7 / claude-sonnet-4-6 |
+| Custom | 任意 |
 
-通过 Streamlit 侧边栏 Provider 下拉框切换，或 API 请求中传 `llm` 字段。预设了 8 个 Provider：
-
-| Provider | Model | Base URL |
-|----------|-------|----------|
-| DeepSeek V4 Pro | deepseek-v4-pro | https://api.deepseek.com/v1 |
-| DeepSeek Chat | deepseek-chat | https://api.deepseek.com/v1 |
-| DeepSeek Reasoner | deepseek-reasoner | https://api.deepseek.com/v1 |
-| OpenAI GPT-4o | gpt-4o | https://api.openai.com/v1 |
-| OpenAI GPT-4o-mini | gpt-4o-mini | https://api.openai.com/v1 |
-| Claude Opus 4.7 | claude-opus-4-7 | https://api.anthropic.com |
-| Claude Sonnet 4.6 | claude-sonnet-4-6 | https://api.anthropic.com |
-| Custom | (任意) | (任意) |
-
-密钥统一存在 `llm_keys.json`（不提交 Git），格式：
-```json
-{"deepseek": "", "openai": "", "anthropic": ""}
-```
-
-底层自动检测 Anthropic URL/Model 名，映射到 `ChatAnthropic` 对应的参数名（`anthropic_api_key`、`anthropic_api_url`、`default_request_timeout`）。
-
-## 用户自定义数据库
-
-编辑 `databases.json` 添加自己的数据库连接，自动出现在 Streamlit 下拉框：
-
-```json
-{
-  "databases": [
-    {"db_id": "my_mysql", "display_name": "我的 MySQL",
-     "database_url": "mysql+pymysql://user:pass@host:3306/db"},
-    {"db_id": "my_pg", "display_name": "我的 PostgreSQL",
-     "database_url": "postgresql+psycopg2://user:pass@host:5432/db"}
-  ]
-}
-```
-
-系统自动检测方言、表数量、在线状态。离线数据库在 UI 上标记 "(offline)"。
-
-## 多数据库冒烟测试
+## 命令速查
 
 ```bash
-# 需要先启动 Docker 容器（MySQL + PG）
-docker compose up -d mysql postgres
-
-# 运行冒烟测试（9 题 × 3 方言）
-python scripts/_smoke_multidb.py
-```
-
-Docker Demo 数据库连接：
-- MySQL: `mysql+pymysql://nl2sql:nl2sql@127.0.0.1:3306/demo`
-- PG: `postgresql+psycopg2://nl2sql:nl2sql@127.0.0.1:5432/demo`
-
-## 评测命令
-
-```bash
-# 测试模式（抽 N 题，指定配置）
+# 评测（测试/完整消融/预计算 gold）
 python scripts/eval_bird.py --test --samples 20 --configs R2,R5
-
-# 完整消融（支持断点续跑）
 python scripts/eval_bird.py --exp ablation --max-workers 8
-
-# 预计算 gold cache（首次或 gold SQL 变更时跑一次）
 python scripts/_precompute_gold.py
+
+# 冒烟测试（需先 docker compose up -d mysql postgres）
+python scripts/_smoke_multidb.py
+
+# BIRD schema 向量化
+python scripts/ingest_bird.py
 ```
 
-## 评测矩阵
+## 已知瓶颈
 
-| Config | Decomposer | RAG | Multi-Candidate | Prune+Fewshot | Knowledge |
-|--------|------------|-----|-----------------|---------------|-----------|
-| R0_Baseline | | | | | rag |
-| R1_Decomposer | ✅ | | | | rag |
-| R2_RAG | ✅ | ✅ | | | rag |
-| R3_MultiCandidate | ✅ | ✅ | ✅ | | rag |
-| R4_PruneFewshot | ✅ | ✅ | ✅ | ✅ | rag |
-| R5_Evidence | ✅ | ✅ | ✅ | ✅ | evidence |
-
-## 已知瓶颈与优化方向
-
-1. **Self-Correction 修复率极低 (7-20%)**：Refiner prompt 和上下文传递需要重新设计
-
-2. **Guard FN 率高 (49-68%)** — 设计边界问题，非 bug。Guard 三层检查全是形式验证：
-   - ① SELECT + 无禁用关键字 ② schema 标识符存在性 ③ sqlglot AST 语法
-   - 2026-05-22 深潜 11 样本：**11/11 全部 FN**
-   - **根因**：任何语法正确且标识符存在的 SQL 都会通过，Guard 无语义能力
-   - **已修复 (v0.2.1)**：双引号标识符（`"County Name"`）的 FP 误报 — 正则未 strip 导致内部单词被当成裸标识符
-   - **方向**：加硬规则层（关键词→语法要求映射），如 "top N" → 检查是否有 ORDER BY
-
-3. **SemCheck FN 率高 (50-65%)** — 两个根因叠加：
-   - ① 无 gold 参照，LLM 从零判断语义正确性能力不足
-   - ② 即使 prompt 已重构为三步结构化评估 + max_tokens 提至 256，FN 率仍在 50% 左右
-   - **方向**：引入 gold 参照对比、加硬规则层（关键词→语法要求映射）
-
-4. **Generator 时间占比 50%+**：多候选时翻倍（2.5→6.0s），考虑 speculative decoding
-
-5. **Decomposer 对 DeepSeek 无效**：模型不具备拆解能力时禁用更优
-
-6. **MySQL Decimal 类型** (v0.2.1 已修复)：`cache_set_llm` 中 `json.dumps` 无法序列化 MySQL DECIMAL 字段返回的 Python `Decimal` 对象，`_sanitize_exec_result` 已加 `Decimal → float` 转换，`redis_cache.py` 加 `default=str` 兜底。
+1. **Self-Correction 修复率 7-20%** — Refiner 需重新设计
+2. **SemCheck FN 率 50-65%** — 缺 gold 参照，方向：引入参照对比 + 硬规则层
+3. **Guard FN 率 49-68%** — 纯形式校验无语义能力，方向：关键词→语法要求映射
+4. **Generator 时间占比 50%+** — 多候选时翻倍
 
 ## Redis 连接策略
 
-`get_redis()` 本地优先 + Docker 自动回退：
-
-1. 若 `REDIS_URL` 环境变量非默认值 → 直接用（Docker Compose 内会设 `redis://redis:6379/0`）
-2. 否则自动探测：`127.0.0.1:6379` → `redis:6379`
-3. 全部失败 → 返回 None，所有缓存操作静默降级为 no-op
-
-已删除的死代码（v0.2.1）：`cache_get_schema` / `cache_set_schema` / `cache_get_table_catalog` / `cache_set_table_catalog` — Schema 缓存定义了但从未接入调用链，实际 `_get_cached_schema_info()` 走的是本地 `lru_cache`。
+环境变量 `REDIS_URL` 优先 → 探测 `127.0.0.1:6379` → `redis:6379` → 全部失败返回 None（静默降级 no-op）。
 
 ## 编码约定
 
-- SQLAlchemy 2.0：`with engine.connect() as conn:`，不用 `engine.execute()`
+- SQLAlchemy 2.0：`with engine.connect() as conn:`
 - 文件读写显式 `encoding='utf-8'`
-- 所有 LLM prompt 从 `src/prompts.py` 引用，不在节点内硬编码
-- Schema 访问统一走 `_get_cached_schema_info()`，禁止绕过
-- Pool/Executor 超时后必须 `shutdown(wait=False)`
-- TraceLogger 节点：`tlog.node_enter/exit`，LLM 调用：`tlog.llm_call/llm_error`
+- Prompt 从 `src/prompts.py` 引用，不硬编码
+- Schema 统一走 `_get_cached_schema_info()`
+- Pool/Executor 超时后 `shutdown(wait=False)`
+- TraceLogger：`tlog.node_enter/exit`，LLM：`tlog.llm_call/llm_error`
