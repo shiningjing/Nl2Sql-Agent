@@ -13,7 +13,7 @@ def _get_project_root() -> str:
     if _PROJECT_ROOT:
         return _PROJECT_ROOT
     candidates = [
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         os.getcwd(),
     ]
     for c in candidates:

@@ -13,7 +13,7 @@ from pathlib import Path
 
 def _default_data_dir() -> str:
     return os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "data", "bird", "mini_dev_data", "minidev", "MINIDEV",
     )
 

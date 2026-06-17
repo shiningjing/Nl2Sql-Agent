@@ -31,12 +31,12 @@ OpenTelemetry → Tracing / Metrics / Logs
 
 ### 四周安排
 
-| 周次 | 主题 | 核心交付 |
-|------|------|----------|
-| W1 | 重构 + AgentOps 基础 | 模块化拆分、统一 AgentState、OpenTelemetry 全链路 tracing、BIRD 自动评测脚本 |
-| W2 | MCP 工具化 + 安全 | 7 个 MCP 工具、LangGraph 节点改为 MCP 调用、SQL 安全层（9 规则）、统一错误分类 |
-| W3 | 异步任务 + SSE | Kafka (4 Topic) + Redis 任务状态机、SSE 流式接口、重试/幂等/超时/取消 |
-| W4 | 部署 + 压测 + 文档 | Docker Compose 一键启动、K8s 部署、三类压测（功能/性能/稳定性）、简历材料 |
+| 周次  | 主题               | 核心交付                                                      |
+| --- | ---------------- | --------------------------------------------------------- |
+| W1  | 重构 + AgentOps 基础 | 模块化拆分、统一 AgentState、OpenTelemetry 全链路 tracing、BIRD 自动评测脚本 |
+| W2  | MCP 工具化 + 安全     | 7 个 MCP 工具、LangGraph 节点改为 MCP 调用、SQL 安全层（9 规则）、统一错误分类     |
+| W3  | 异步任务 + SSE       | Kafka (4 Topic) + Redis 任务状态机、SSE 流式接口、重试/幂等/超时/取消        |
+| W4  | 部署 + 压测 + 文档     | Docker Compose 一键启动、K8s 部署、三类压测（功能/性能/稳定性）、简历材料           |
 
 ### 优先级
 
@@ -52,21 +52,21 @@ OpenTelemetry → Tracing / Metrics / Logs
 
 ## 技术栈
 
-| 层 | 当前 | 升级后新增 |
-|----|------|-----------|
-| LLM | DeepSeek / OpenAI / Claude | — |
-| Embedding | BAAI/bge-small-zh-v1.5 (本地) | — |
-| 向量库 | ChromaDB 本地 | — |
-| 编排 | LangGraph + LangChain 1.2+ | — |
-| DB | SQLite / PG / MySQL (SQLAlchemy 2.0) | — |
-| AST | sqlglot | + vitess/sqlparser (Go MCP) |
-| 接口 | FastAPI + Streamlit | + SSE 流式 |
-| 缓存 | Redis (本地优先) | + Redis 任务状态 |
-| 消息 | — | + Kafka |
-| 可观测 | TraceLogger (jsonl) | + OpenTelemetry |
-| 工具 | — | + MCP 协议 |
-| 部署 | Docker Compose | + K8s |
-| 网关 | — | + Go (P1) |
+| 层         | 当前                                   | 升级后新增                       |
+| --------- | ------------------------------------ | --------------------------- |
+| LLM       | DeepSeek / OpenAI / Claude           | —                           |
+| Embedding | BAAI/bge-small-zh-v1.5 (本地)          | —                           |
+| 向量库       | ChromaDB 本地                          | —                           |
+| 编排        | LangGraph + LangChain 1.2+           | —                           |
+| DB        | SQLite / PG / MySQL (SQLAlchemy 2.0) | —                           |
+| AST       | sqlglot                              | + vitess/sqlparser (Go MCP) |
+| 接口        | FastAPI + Streamlit                  | + SSE 流式                    |
+| 缓存        | Redis (本地优先)                         | + Redis 任务状态                |
+| 消息        | —                                    | + Kafka                     |
+| 可观测       | TraceLogger (jsonl)                  | + OpenTelemetry             |
+| 工具        | —                                    | + MCP 协议                    |
+| 部署        | Docker Compose                       | + K8s                       |
+| 网关        | —                                    | + Go (P1)                   |
 
 ## 关键约束
 
@@ -111,12 +111,12 @@ nl2sql-mini-agent/
 
 密钥在 `llm_keys.json`：`{"deepseek": "", "openai": "", "anthropic": ""}`。自动检测 Anthropic URL/Model 映射到 `ChatAnthropic`。
 
-| Provider | Model |
-|----------|-------|
+| Provider                          | Model                                               |
+| --------------------------------- | --------------------------------------------------- |
 | DeepSeek V4 Pro / Chat / Reasoner | deepseek-v4-pro / deepseek-chat / deepseek-reasoner |
-| OpenAI GPT-4o / GPT-4o-mini | gpt-4o / gpt-4o-mini |
-| Claude Opus 4.7 / Sonnet 4.6 | claude-opus-4-7 / claude-sonnet-4-6 |
-| Custom | 任意 |
+| OpenAI GPT-4o / GPT-4o-mini       | gpt-4o / gpt-4o-mini                                |
+| Claude Opus 4.7 / Sonnet 4.6      | claude-opus-4-7 / claude-sonnet-4-6                 |
+| Custom                            | 任意                                                  |
 
 ## 命令速查
 
