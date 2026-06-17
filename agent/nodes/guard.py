@@ -1,5 +1,6 @@
 """Guard node — hard SQL validation before execution. Zero LLM cost."""
 import re
+import time
 from agent.state import AgentState
 from guard.ast_validator import validate_sql_ast
 
@@ -143,6 +144,7 @@ def _get_sqlglot_dialect(database_url: str | None) -> str:
 
 def guard_node(state: AgentState) -> dict:
     """Validate SQL against schema + safety rules. Sets guard_pass / guard_issues / ast_pass / ast_issues."""
+    t0 = time.time()
     sql = state.get("sql", "")
     schema_text = state.get("schema_text", "")
 
@@ -172,9 +174,13 @@ def guard_node(state: AgentState) -> dict:
         tlog.guard_result(passed, issues)
         tlog.node_exit("guard", {"passed": passed, "issue_count": len(issues)})
 
+    node_latency = dict(state.get("node_latency", {}))
+    node_latency["guard"] = round(time.time() - t0, 3)
+
     return {
         "guard_pass": passed,
         "guard_issues": issues,
         "ast_pass": ast_pass,
         "ast_issues": ast_issues,
+        "node_latency": node_latency,
     }

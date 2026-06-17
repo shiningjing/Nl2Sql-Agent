@@ -84,3 +84,7 @@ class AgentState(TypedDict):
 
     # ── W5: Trace ──
     tlog: NotRequired[object]  # TraceLogger instance (not serialized)
+
+    # ── W1: Observability ──
+    node_latency: NotRequired[dict[str, float]]  # per-node elapsed seconds
+    repair_history: NotRequired[list[dict]]  # [{attempt, error_source, error_type, failed_sql, fix_strategy}]

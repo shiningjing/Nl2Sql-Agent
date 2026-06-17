@@ -65,7 +65,7 @@ def _llm_vote(question: str, schema_text: str, candidates: list[str], tlog=None)
         _duration = round(time.time() - _t0, 3)
         tu = response.response_metadata.get("token_usage", {}) if hasattr(response, "response_metadata") else {}
         if tlog:
-            tlog.llm_call(Config.LLM_CHAT_MODEL, tu, _duration)
+            tlog.llm_call(Config.LLM_CHAT_MODEL, tu, _duration, node="voter")
             tlog.node_exit("voter_llm", {"raw": response.content.strip()[:60]})
         match = re.search(r"\d+", response.content)
         if match:
@@ -74,7 +74,7 @@ def _llm_vote(question: str, schema_text: str, candidates: list[str], tlog=None)
                 return candidates[idx]
     except Exception as e:
         if tlog:
-            tlog.llm_error(Config.LLM_CHAT_MODEL, type(e).__name__, str(e)[:300])
+            tlog.llm_error(Config.LLM_CHAT_MODEL, type(e).__name__, str(e)[:300], node="voter")
             tlog.node_exit("voter_llm", {"error": str(e)[:120]})
 
     return candidates[0]  # fallback to first (lowest temp)
@@ -82,6 +82,7 @@ def _llm_vote(question: str, schema_text: str, candidates: list[str], tlog=None)
 
 def voter_node(state: AgentState) -> dict:
     """Execute candidates in parallel, vote by result hash. LLM vote as timeout/offline fallback."""
+    t0 = time.time()
     sql = state.get("sql", "")
     candidate_sqls = state.get("candidate_sqls", [])
     sqls = candidate_sqls if candidate_sqls else [sql]
@@ -96,10 +97,13 @@ def voter_node(state: AgentState) -> dict:
     # ── No database → LLM vote ──
     if not database_url:
         winner = _llm_vote(question, schema_text, sqls, tlog)
+        node_latency = dict(state.get("node_latency", {}))
+        node_latency["voter"] = round(time.time() - t0, 3)
         return {
             "sql": winner or sql,
             "exec_result": {"success": True, "error": "", "data": [],
                             "columns": [], "row_count": 0, "_voted_by": "llm_nodb"},
+            "node_latency": node_latency,
         }
 
     # ── Execute candidates (single or parallel) ──
@@ -146,19 +150,25 @@ def voter_node(state: AgentState) -> dict:
         if tlog:
             tlog.node_exit("voter", {"winner": "llm_fallback", "reason": reason})
         winner = _llm_vote(question, schema_text, sqls, tlog)
+        node_latency = dict(state.get("node_latency", {}))
+        node_latency["voter"] = round(time.time() - t0, 3)
         return {
             "sql": winner or sql,
             "exec_result": {"success": True, "error": "", "data": [],
                             "columns": [], "row_count": 0, "_voted_by": f"llm_{reason}"},
+            "node_latency": node_latency,
         }
 
     # Single candidate → no vote needed
     if len(successful) == 1:
         if tlog:
             tlog.node_exit("voter", {"winner": "single", "successful_count": 1})
+        node_latency = dict(state.get("node_latency", {}))
+        node_latency["voter"] = round(time.time() - t0, 3)
         return {
             "sql": successful[0]["sql"],
             "exec_result": {**successful[0]["result"], "_sql": successful[0]["sql"]},
+            "node_latency": node_latency,
         }
 
     # Vote: group by result hash
@@ -173,17 +183,23 @@ def voter_node(state: AgentState) -> dict:
                 if tlog:
                     tlog.node_exit("voter", {"winner": "majority", "successful_count": len(successful),
                                              "hash_count": most_common[0][1]})
+                node_latency = dict(state.get("node_latency", {}))
+                node_latency["voter"] = round(time.time() - t0, 3)
                 return {
                     "sql": r["sql"],
                     "exec_result": {**r["result"], "_sql": r["sql"]},
+                    "node_latency": node_latency,
                 }
     else:
         best = min(successful, key=lambda r: r["result"].get("row_count", float("inf")))
         if tlog:
             tlog.node_exit("voter", {"winner": "tiebreak", "successful_count": len(successful)})
+        node_latency = dict(state.get("node_latency", {}))
+        node_latency["voter"] = round(time.time() - t0, 3)
         return {
             "sql": best["sql"],
             "exec_result": {**best["result"], "_sql": best["sql"]},
+            "node_latency": node_latency,
         }
 
     return {}  # unreachable

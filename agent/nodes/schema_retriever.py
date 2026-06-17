@@ -1,4 +1,5 @@
 """Schema Retriever node — BIRD RAG retrieval + prompt context building."""
+import time
 from retrieval.rag_retrieve import retrieve_bird, build_prompt_context
 from retrieval.schema import get_schema_summary, get_sample_rows, _get_cached_schema_info
 from agent.state import AgentState
@@ -37,6 +38,8 @@ def schema_retriever_node(state: AgentState) -> dict:
     Also initializes TraceLogger with a new trace_id on first entry — all
     downstream nodes read tlog from state to emit structured log events.
     """
+    t_start = time.time()
+
     # ── Trace init (Router may have already created it) ──
     tlog = state.get("tlog")
     if not tlog:
@@ -112,6 +115,9 @@ def schema_retriever_node(state: AgentState) -> dict:
         "chunk_count": len(rag_chunks),
     })
 
+    node_latency = dict(state.get("node_latency", {}))
+    node_latency["schema_retriever"] = round(time.time() - t_start, 3)
+
     return {
         "rag_chunks": rag_chunks,
         "schema_text": schema_text,
@@ -119,4 +125,5 @@ def schema_retriever_node(state: AgentState) -> dict:
         "sample_rows_text": sample_rows_text,
         "trace_id": trace_id,
         "tlog": tlog,
+        "node_latency": node_latency,
     }

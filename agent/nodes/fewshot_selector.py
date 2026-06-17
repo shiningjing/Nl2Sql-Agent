@@ -1,4 +1,5 @@
 """Few-shot Selector node — retrieves similar (Q, SQL) examples for Generator prompt."""
+import time
 from agent.state import AgentState
 from retrieval.fewshot_retrieve import retrieve_fewshot, retrieve_fewshot_for_db, format_fewshot
 from agent.generator_llm import get_dialect_from_url
@@ -10,6 +11,7 @@ def fewshot_selector_node(state: AgentState) -> dict:
     Lookup order: db_id first (BIRD databases), then dialect (mysql/postgresql).
     Falls back to generic retrieval if neither matches.
     """
+    t0 = time.time()
     question = state.get("question", "")
     enabled = state.get("fewshot_enabled", False)
     db_id = state.get("db_id", "")
@@ -42,4 +44,7 @@ def fewshot_selector_node(state: AgentState) -> dict:
     if tlog:
         tlog.node_exit("fewshot_selector", {"example_count": len(items), "hits": fewshot_hits})
 
-    return {"fewshot_text": fewshot_text, "fewshot_hits": fewshot_hits}
+    node_latency = dict(state.get("node_latency", {}))
+    node_latency["fewshot_selector"] = round(time.time() - t0, 3)
+
+    return {"fewshot_text": fewshot_text, "fewshot_hits": fewshot_hits, "node_latency": node_latency}

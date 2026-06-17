@@ -1,4 +1,5 @@
 """Refiner node — formats execution/guard/semantic errors with schema-aware hints."""
+import time
 import difflib
 import re
 
@@ -219,6 +220,7 @@ def _format_semantic_feedback(feedback: str, sql: str, exec_result: dict) -> str
 
 def refiner_node(state: AgentState) -> dict:
     """Format error with schema-aware hints and set retry context for Generator."""
+    t0 = time.time()
     exec_result = state.get("exec_result", {})
     sql = state.get("last_sql", state.get("sql", ""))
     question = state.get("question", "")
@@ -293,6 +295,24 @@ def refiner_node(state: AgentState) -> dict:
 
     if tlog:
         tlog.node_exit("refiner", {"rag_expanded": rag_k_expanded is not None})
+
+    node_latency = dict(state.get("node_latency", {}))
+    node_latency["refiner"] = round(time.time() - t0, 3)
+    update["node_latency"] = node_latency
+
+    # Record repair history
+    repair_history = list(state.get("repair_history", []))
+    error_source = "semantic" if (semantic_feedback and not exec_error) else \
+                   "execution" if exec_error else \
+                   "guard" if guard_issues else "unknown"
+    repair_history.append({
+        "attempt": retry_count + 1,
+        "error_source": error_source,
+        "error_type": hint_type if exec_error else "",
+        "failed_sql": sql[:300],
+        "fix_strategy": "rag_expand" if rag_k_expanded else "feedback_only",
+    })
+    update["repair_history"] = repair_history
 
     return update
 

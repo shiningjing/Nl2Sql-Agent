@@ -131,6 +131,7 @@ def generator_node(state: AgentState) -> dict:
     """Generate SQL. Multi-candidate with dedup + early stop when enabled."""
     from agent.generator_llm import get_dialect_from_url
 
+    t0 = time.time()
     question = state["question"]
     tlog = state.get("tlog")
     if tlog:
@@ -160,13 +161,15 @@ def generator_node(state: AgentState) -> dict:
             )
         except Exception as e:
             if tlog:
-                tlog.llm_error(Config.LLM_CHAT_MODEL, type(e).__name__, str(e)[:300])
-                tlog.node_exit("generator", {"error": str(e)[:120]})
+                tlog.llm_error(Config.LLM_CHAT_MODEL, type(e).__name__, str(e)[:300], node="generator")
+                tlog.node_exit("generator", {"error": str(e)[:120]}, status="error")
             raise
         token_usage = {k: token_usage[k] + tu.get(k, 0) for k in token_usage}
+        node_latency = dict(state.get("node_latency", {}))
+        node_latency["generator"] = round(time.time() - t0, 3)
         if tlog:
-            tlog.llm_call(Config.LLM_CHAT_MODEL, tu, dur)
-            tlog.node_exit("generator", {"sql_len": len(sql), "candidate_count": 1})
+            tlog.llm_call(Config.LLM_CHAT_MODEL, tu, dur, node="generator")
+            tlog.node_exit("generator", {"sql_len": len(sql), "candidate_count": 1}, status="success")
         return {
             "sql": sql,
             "raw_response": raw,
@@ -174,6 +177,7 @@ def generator_node(state: AgentState) -> dict:
             "candidate_sqls": [],
             "last_error": "",
             "last_sql": "",
+            "node_latency": node_latency,
         }
 
     # Multi-candidate: temp 0, 0.3, 0.6 with dedup + early stop.
@@ -194,18 +198,18 @@ def generator_node(state: AgentState) -> dict:
             )
         except Exception as e:
             if tlog:
-                tlog.llm_error(Config.LLM_CHAT_MODEL, type(e).__name__, str(e)[:300])
+                tlog.llm_error(Config.LLM_CHAT_MODEL, type(e).__name__, str(e)[:300], node="generator")
             if i == 0:
                 # First candidate failed — re-raise to trigger graph-level error handling
                 if tlog:
-                    tlog.node_exit("generator", {"error": str(e)[:120]})
+                    tlog.node_exit("generator", {"error": str(e)[:120]}, status="error")
                 raise
             # Non-first candidate failed — skip and continue
             continue
         token_usage = {k: token_usage[k] + tu.get(k, 0) for k in token_usage}
         raw_responses.append(raw)
         if tlog:
-            tlog.llm_call(Config.LLM_CHAT_MODEL, tu, dur)
+            tlog.llm_call(Config.LLM_CHAT_MODEL, tu, dur, node="generator")
 
         if not sql:
             continue
@@ -223,6 +227,8 @@ def generator_node(state: AgentState) -> dict:
 
     if not candidates:
         # All failed → return empty, will be caught downstream
+        node_latency = dict(state.get("node_latency", {}))
+        node_latency["generator"] = round(time.time() - t0, 3)
         if tlog:
             tlog.node_exit("generator", {"sql_len": 0, "candidate_count": 0, "error": "all failed"})
         return {
@@ -232,7 +238,11 @@ def generator_node(state: AgentState) -> dict:
             "candidate_sqls": [],
             "last_error": "All generation attempts returned empty SQL.",
             "last_sql": "",
+            "node_latency": node_latency,
         }
+
+    node_latency = dict(state.get("node_latency", {}))
+    node_latency["generator"] = round(time.time() - t0, 3)
 
     if tlog:
         tlog.node_exit("generator", {"sql_len": len(candidates[0]), "candidate_count": len(candidates)})
@@ -244,4 +254,5 @@ def generator_node(state: AgentState) -> dict:
         "candidate_sqls": candidates,
         "last_error": "",
         "last_sql": "",
+        "node_latency": node_latency,
     }

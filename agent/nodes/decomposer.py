@@ -39,6 +39,8 @@ def _extract_token_usage(response) -> dict:
 
 def decomposer_node(state: AgentState) -> dict:
     """Break complex question into sub-question DAG. LLM call."""
+    import time as _time
+    _t0 = _time.time()
     question = state["question"]
 
     tlog = state.get("tlog")
@@ -58,8 +60,6 @@ def decomposer_node(state: AgentState) -> dict:
     user_message = "\n\n".join(parts)
 
     try:
-        import time as _time
-        _t0 = _time.time()
         response = chat.invoke([
             SystemMessage(content=SYSTEM_PROMPT),
             HumanMessage(content=user_message),
@@ -71,8 +71,8 @@ def decomposer_node(state: AgentState) -> dict:
         steps = parsed.get("steps", [])
     except Exception as e:
         if tlog:
-            tlog.llm_error(Config.LLM_CHAT_MODEL, type(e).__name__, str(e)[:300])
-            tlog.node_exit("decomposer", {"error": str(e)[:120]})
+            tlog.llm_error(Config.LLM_CHAT_MODEL, type(e).__name__, str(e)[:300], node="decomposer")
+            tlog.node_exit("decomposer", {"step_count": 0, "error": str(e)[:120]}, status="error")
         raise
 
     # Single step = LLM decided no decomposition needed.
@@ -85,10 +85,14 @@ def decomposer_node(state: AgentState) -> dict:
     token_usage = {k: token_usage[k] + tu.get(k, 0) for k in token_usage}
 
     if tlog:
-        tlog.llm_call(Config.LLM_CHAT_MODEL, tu, _duration)
-        tlog.node_exit("decomposer", {"step_count": len(steps)})
+        tlog.llm_call(Config.LLM_CHAT_MODEL, tu, _duration, node="decomposer")
+        tlog.node_exit("decomposer", {"step_count": len(steps)}, status="success")
+
+    node_latency = dict(state.get("node_latency", {}))
+    node_latency["decomposer"] = round(_time.time() - _t0, 3)
 
     return {
         "sub_questions": steps,
         "token_usage": token_usage,
+        "node_latency": node_latency,
     }

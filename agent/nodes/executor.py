@@ -48,6 +48,7 @@ def executor_node(state: AgentState) -> dict:
     Only used for standalone execution (not called within Voter flow).
     When Voter already ran, exec_result is pre-populated and this can be skipped.
     """
+    t0 = time.time()
     sql = state.get("sql", "")
     exec_attempts = list(state.get("exec_attempts", []))
     retry_count = state.get("retry_count", 0)
@@ -58,7 +59,9 @@ def executor_node(state: AgentState) -> dict:
             "success": False, "error": "No SQL to execute",
             "data": None, "columns": None, "row_count": 0,
         }
-        return {"exec_result": exec_result, "exec_attempts": exec_attempts}
+        node_latency = dict(state.get("node_latency", {}))
+        node_latency["executor"] = round(time.time() - t0, 3)
+        return {"exec_result": exec_result, "exec_attempts": exec_attempts, "node_latency": node_latency}
 
     # Skip if already executed by Voter (same sql)
     existing = state.get("exec_result")
@@ -84,8 +87,12 @@ def executor_node(state: AgentState) -> dict:
                        result.get("_elapsed_ms", 0) / 1000, result.get("error", ""))
         tlog.node_exit("executor", {"success": result["success"], "row_count": result.get("row_count", 0)})
 
+    node_latency = dict(state.get("node_latency", {}))
+    node_latency["executor"] = round(time.time() - t0, 3)
+
     return {
         "exec_result": result,
         "exec_attempts": exec_attempts,
         "retry_count": attempt_num,
+        "node_latency": node_latency,
     }

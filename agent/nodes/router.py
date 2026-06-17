@@ -232,6 +232,7 @@ def _llm_classify(question: str) -> tuple[str, str, dict, float]:
 
 def router_node(state: AgentState) -> dict:
     """Classify question. Plan C: heuristic cascade + LLM borderline gate."""
+    t0 = time.time()
     q = state["question"]
 
     tlog = state.get("tlog")
@@ -253,13 +254,13 @@ def router_node(state: AgentState) -> dict:
             complexity, llm_raw, llm_tu, llm_dur = _llm_classify(q)
             method = "llm_borderline"
         except Exception as e:
-            tlog.llm_error(Config.LLM_CHAT_MODEL, type(e).__name__, str(e)[:300])
+            tlog.llm_error(Config.LLM_CHAT_MODEL, type(e).__name__, str(e)[:300], node="router")
             # Fallback: treat as complex (safer — enables decomposer + more shots)
             complexity = "complex"
             method = "llm_borderline_error"
             llm_raw = ""
             llm_tu = {}
-        tlog.llm_call(Config.LLM_CHAT_MODEL, llm_tu, llm_dur)
+        tlog.llm_call(Config.LLM_CHAT_MODEL, llm_tu, llm_dur, node="router")
         for k in token_usage:
             token_usage[k] += llm_tu.get(k, 0)
     else:
@@ -268,6 +269,9 @@ def router_node(state: AgentState) -> dict:
 
     tlog.router_decision(complexity, score, method)
     tlog.node_exit("router", {"complexity": complexity, "score": score, "method": method})
+
+    node_latency = dict(state.get("node_latency", {}))
+    node_latency["router"] = round(time.time() - t0, 3)
 
     result: dict = {
         "complexity": complexity,
@@ -278,6 +282,7 @@ def router_node(state: AgentState) -> dict:
         "tlog": tlog,
         "trace_id": tlog.trace_id,
         "token_usage": token_usage,
+        "node_latency": node_latency,
     }
     if method == "llm_borderline":
         result["router_llm_raw"] = llm_raw

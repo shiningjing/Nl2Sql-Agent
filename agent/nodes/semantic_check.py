@@ -153,9 +153,10 @@ def semantic_check_node(state: AgentState) -> dict:
     schema_text = state.get("schema_text", "")
     exec_result = state.get("exec_result") or {}
 
+    t0 = time.time()
+
     if not sql or not question:
         return {"semantic_pass": True, "semantic_feedback": ""}
-
     # Escape hatch: same SQL rejected ���2 consecutive times → pass
     last_rejected = state.get("_sem_last_rejected_sql", "")
     reject_count = state.get("_sem_reject_count", 0)
@@ -165,9 +166,12 @@ def semantic_check_node(state: AgentState) -> dict:
         if tlog:
             tlog.node_enter("semantic_check", {"sql_len": len(sql), "escape_hatch": True})
             tlog.node_exit("semantic_check", {"passed": True, "escape_hatch": True})
+        node_latency = dict(state.get("node_latency", {}))
+        node_latency["semantic_check"] = round(time.time() - t0, 3)
         return {
             "semantic_pass": True,
             "semantic_feedback": f"(escape hatch: same SQL rejected {reject_count} times, passing)",
+            "node_latency": node_latency,
         }
 
     tlog = state.get("tlog")
@@ -227,13 +231,15 @@ def semantic_check_node(state: AgentState) -> dict:
         raw = response.content.strip()
         tu = response.response_metadata.get("token_usage", {}) if hasattr(response, "response_metadata") else {}
         if tlog:
-            tlog.llm_call(Config.LLM_CHAT_MODEL, tu, _duration)
+            tlog.llm_call(Config.LLM_CHAT_MODEL, tu, _duration, node="semantic_check")
     except Exception as e:
         tlog = state.get("tlog")
         if tlog:
-            tlog.llm_error(Config.LLM_CHAT_MODEL, type(e).__name__, str(e)[:300])
+            tlog.llm_error(Config.LLM_CHAT_MODEL, type(e).__name__, str(e)[:300], node="semantic_check")
             tlog.node_exit("semantic_check", {"error": str(e)[:120]})
-        return {"semantic_pass": True, "semantic_feedback": f"(check skipped: {e})"}
+        node_latency = dict(state.get("node_latency", {}))
+        node_latency["semantic_check"] = round(time.time() - t0, 3)
+        return {"semantic_pass": True, "semantic_feedback": f"(check skipped: {e})", "node_latency": node_latency}
 
     raw_upper = raw.upper()
     if raw_upper.startswith("YES"):
@@ -266,6 +272,10 @@ def semantic_check_node(state: AgentState) -> dict:
         "_sem_reject_count": new_count,
         "_sem_last_rejected_sql": normalized if not passed else "",
     }
+
+    node_latency = dict(state.get("node_latency", {}))
+    node_latency["semantic_check"] = round(time.time() - t0, 3)
+    result["node_latency"] = node_latency
 
     if not passed:
         result["last_error"] = f"Semantic check failed: {reason}"

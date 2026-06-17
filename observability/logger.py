@@ -61,17 +61,29 @@ class TraceLogger:
             except Exception:
                 pass  # never let trace I/O break the pipeline
 
-    def node_enter(self, node: str, meta: dict | None = None):
+    def node_enter(self, node: str, meta: dict | None = None,
+                   model: str = "", prompt_version: str = ""):
         key = f"{node}:enter"
         self._start_times[key] = time.time()
-        self._emit("node_enter", {"node": node, **(meta or {})})
+        data: dict = {"node": node, **(meta or {})}
+        if model:
+            data["model"] = model
+        if prompt_version:
+            data["prompt_version"] = prompt_version
+        self._emit("node_enter", data)
 
-    def node_exit(self, node: str, meta: dict | None = None):
+    def node_exit(self, node: str, meta: dict | None = None,
+                  status: str = "success", model: str = "", prompt_version: str = ""):
         key = f"{node}:enter"
         duration = 0.0
         if key in self._start_times:
             duration = round(time.time() - self._start_times.pop(key), 3)
-        self._emit("node_exit", {"node": node, "duration_s": duration, **(meta or {})})
+        data: dict = {"node": node, "duration_s": duration, "status": status, **(meta or {})}
+        if model:
+            data["model"] = model
+        if prompt_version:
+            data["prompt_version"] = prompt_version
+        self._emit("node_exit", data)
 
     def node_error(self, node: str, error_type: str, error_msg: str):
         key = f"{node}:enter"
@@ -85,22 +97,28 @@ class TraceLogger:
             "error": error_msg[:300],
         })
 
-    def llm_call(self, model: str, usage: dict, duration_s: float = 0):
-        self._emit("llm_call", {
+    def llm_call(self, model: str, usage: dict, duration_s: float = 0, node: str = ""):
+        data: dict = {
             "model": model,
             "prompt_tokens": usage.get("prompt_tokens", 0),
             "completion_tokens": usage.get("completion_tokens", 0),
             "total_tokens": usage.get("total_tokens", 0),
             "duration_s": round(duration_s, 3),
-        })
+        }
+        if node:
+            data["node"] = node
+        self._emit("llm_call", data)
 
-    def llm_error(self, model: str, error_type: str, error_msg: str, duration_s: float = 0):
-        self._emit("llm_error", {
+    def llm_error(self, model: str, error_type: str, error_msg: str, duration_s: float = 0, node: str = ""):
+        data: dict = {
             "model": model,
             "error_type": error_type,
             "error": error_msg[:300],
             "duration_s": round(duration_s, 3),
-        })
+        }
+        if node:
+            data["node"] = node
+        self._emit("llm_error", data)
 
     def sql_exec(self, success: bool, row_count: int, duration_s: float, error: str = ""):
         self._emit("sql_exec", {
