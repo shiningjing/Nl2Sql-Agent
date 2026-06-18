@@ -25,8 +25,13 @@ def _normalize(rows: list, columns: list) -> str:
     return str(sorted(norm))
 
 
-def _llm_vote(question: str, schema_text: str, candidates: list[str], tlog=None) -> str | None:
-    """Ask LLM to pick the best SQL candidate. Returns winning SQL or None."""
+def _llm_vote(question: str, schema_text: str, candidates: list[str],
+              exec_results: list[dict] | None = None, tlog=None) -> str | None:
+    """Ask LLM to pick the best SQL candidate. Returns winning SQL or None.
+
+    When exec_results is provided (tie-breaking), each candidate's columns
+    and row_count are included to help the LLM discriminate.
+    """
     if not candidates:
         return None
     if len(candidates) == 1:
@@ -38,11 +43,16 @@ def _llm_vote(question: str, schema_text: str, candidates: list[str], tlog=None)
 
     parts = [f"## QUESTION\n{question}"]
     if schema_text:
-        # Keep schema concise — first 3000 chars covers relevant tables
         parts.append(f"## SCHEMA\n{schema_text[:3000]}")
     parts.append("## CANDIDATES")
     for i, sql in enumerate(candidates):
         parts.append(f"### Candidate {i}\n```sql\n{sql}\n```")
+        if exec_results and i < len(exec_results):
+            er = exec_results[i]
+            parts.append(
+                f"Result: row_count={er.get('row_count', '?')}, "
+                f"columns={er.get('columns', [])[:10]}"
+            )
     parts.append(
         "\nCompare the candidates. Return ONLY the integer index of the best SQL. "
         "Best = logically correct, answers the question precisely, handles edge cases. "
@@ -191,14 +201,30 @@ def voter_node(state: AgentState) -> dict:
                     "node_latency": node_latency,
                 }
     else:
-        best = min(successful, key=lambda r: r["result"].get("row_count", float("inf")))
+        # Tie-break: no majority → LLM vote with execution results
+        tie_sqls = [r["sql"] for r in successful]
+        tie_execs = [r["result"] for r in successful]
+        winner = _llm_vote(question, schema_text, tie_sqls, exec_results=tie_execs, tlog=tlog)
+        # winner is a SQL string; find matching result
+        for r in successful:
+            if r["sql"] == winner:
+                if tlog:
+                    tlog.node_exit("voter", {"winner": "tiebreak_llm", "successful_count": len(successful)})
+                node_latency = dict(state.get("node_latency", {}))
+                node_latency["voter"] = round(time.time() - t0, 3)
+                return {
+                    "sql": r["sql"],
+                    "exec_result": {**r["result"], "_sql": r["sql"]},
+                    "node_latency": node_latency,
+                }
+        # Fallback: LLM returned unexpected → use first candidate
         if tlog:
-            tlog.node_exit("voter", {"winner": "tiebreak", "successful_count": len(successful)})
+            tlog.node_exit("voter", {"winner": "tiebreak_fallback", "successful_count": len(successful)})
         node_latency = dict(state.get("node_latency", {}))
         node_latency["voter"] = round(time.time() - t0, 3)
         return {
-            "sql": best["sql"],
-            "exec_result": {**best["result"], "_sql": best["sql"]},
+            "sql": successful[0]["sql"],
+            "exec_result": {**successful[0]["result"], "_sql": successful[0]["sql"]},
             "node_latency": node_latency,
         }
 

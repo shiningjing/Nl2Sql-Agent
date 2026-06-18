@@ -144,7 +144,7 @@ def generator_node(state: AgentState) -> dict:
     last_sql = state.get("last_sql", "")
     sub_questions = state.get("sub_questions") or None
     fewshot_text = state.get("fewshot_text", "")
-    multi = state.get("multi_candidate", True)
+    multi = state.get("retry_count", 0) > 0
     database_url = state.get("database_url")
     _dialect = get_dialect_from_url(database_url) if database_url else None
 
