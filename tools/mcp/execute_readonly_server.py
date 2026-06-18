@@ -37,7 +37,7 @@ mcp = FastMCP("execute-readonly-sql")
 
 _MAX_ROWS_HARD_CAP = 1000
 _DEFAULT_MAX_ROWS = 200
-_DEFAULT_TIMEOUT_MS = 30000
+_DEFAULT_TIMEOUT_MS = 60000
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -193,7 +193,7 @@ def execute_readonly_sql(
     pool = ThreadPoolExecutor(max_workers=1)
     try:
         fut = pool.submit(_run)
-        result = fut.result(timeout=timeout_ms / 1000.0 + 5)  # +5s grace for overhead
+        result = fut.result(timeout=timeout_ms / 1000.0)
     except FutureTimeoutError:
         elapsed_ms = int((time.time() - t0) * 1000)
         return {
