@@ -250,6 +250,16 @@ def get_task_timeout(retry_count: int = 0) -> int:
     return TASK_TIMEOUTS[idx]
 
 
+# ── Token streaming (Redis pub/sub) ───────────────────────────────────────────
+
+def task_publish_token(task_id: str, text: str) -> None:
+    """Publish a single LLM token to the task's Redis pub/sub channel."""
+    r = _get_redis()
+    if r is None:
+        return
+    r.publish(f"task:{task_id}:tokens", text)
+
+
 # ── Internals ────────────────────────────────────────────────────────────────
 
 def _ttl_for_status(status: str) -> int:

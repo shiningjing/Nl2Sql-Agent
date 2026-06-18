@@ -64,8 +64,8 @@ def _get_databases():
 @st.cache_data(ttl=3600)
 def _load_bird_json():
     import json, os
-    root = os.path.join(os.path.dirname(__file__), "data", "bird", "mini_dev_data",
-                        "minidev", "MINIDEV")
+    root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "data", "bird", "mini_dev_data", "minidev", "MINIDEV")
     with open(os.path.join(root, "mini_dev_sqlite.json"), "r", encoding="utf-8") as f:
         return json.load(f)
 
@@ -93,11 +93,13 @@ def _snapshot_result(result: dict) -> dict:
     }
 
 
-# ── SSE streaming client ──
+# ── Async task SSE streaming client ──
 
-def _call_api_stream(question: str, db_id: str, database_url: str) -> dict:
+def _call_api_async(question: str, db_id: str, database_url: str) -> dict:
+    """Submit async task → stream SSE from /task/{id}/stream."""
     import httpx
-    payload = {
+
+    llm_payload = {
         "question": question,
         "db_id": db_id,
         "database_url": database_url,
@@ -109,7 +111,6 @@ def _call_api_stream(question: str, db_id: str, database_url: str) -> dict:
         "rag_hybrid": True,
         "rag_fk_expand": st.session_state.rag_fk_expand,
         "fewshot_enabled": st.session_state.fewshot_enabled,
-        "use_cache": False,
         "llm": {
             "model": st.session_state.llm_model or None,
             "api_key": st.session_state.llm_api_key or None,
@@ -117,14 +118,26 @@ def _call_api_stream(question: str, db_id: str, database_url: str) -> dict:
         },
     }
 
+    # Step 1: submit task
+    try:
+        submit_resp = httpx.post(f"{API_BASE}/api/v1/task/submit", json=llm_payload, timeout=10)
+        if submit_resp.status_code != 202:
+            return {"sql": "", "exec_result": {"success": False, "error": f"Task submission failed ({submit_resp.status_code})"},
+                    "token_usage": {}, "elapsed_ms": 0, "rag_chunks": [], "node_timings": {}, "raw_response": ""}
+        task_id = submit_resp.json()["task_id"]
+    except Exception as e:
+        return {"sql": "", "exec_result": {"success": False, "error": f"Task submission error: {e}"},
+                "token_usage": {}, "elapsed_ms": 0, "rag_chunks": [], "node_timings": {}, "raw_response": str(e)}
+
+    # Step 2: stream SSE
     progress = st.empty()
     node_list = []
     sql_preview = ""
     token_buffer = ""
+    seen_nodes = set()
 
     try:
-        with httpx.stream("POST", f"{API_BASE}/api/v1/query/full/stream",
-                          json=payload, timeout=180) as resp:
+        with httpx.stream("GET", f"{API_BASE}/api/v1/task/{task_id}/stream", timeout=360) as resp:
             current_event = None
             for line in resp.iter_lines():
                 if line.startswith("event:"):
@@ -142,26 +155,22 @@ def _call_api_stream(question: str, db_id: str, database_url: str) -> dict:
                             st.caption(" -> ".join(node_list + ["generating..."]))
                             st.code(token_buffer, language="sql")
 
-                    elif current_event == "node_complete":
+                    elif current_event == "node_done":
                         node = data.get("node", "?")
-                        summary = data.get("summary", {})
-                        if node == "_post_refiner":
-                            pass
-                        else:
+                        if node not in seen_nodes:
+                            seen_nodes.add(node)
                             node_list.append(node)
                             with progress.container():
                                 st.caption(" -> ".join(node_list))
-                                if node == "generator":
-                                    sql_preview = summary.get("sql_preview", "")
-                                    token_buffer = ""
-                                    if sql_preview:
-                                        st.code(sql_preview, language="sql")
-                                elif node == "guard":
-                                    st.caption(f"Guard: {'PASS' if summary.get('guard_pass') else 'FAIL'}")
-                                elif node == "voter":
-                                    st.caption(f"Voter: {'OK' if summary.get('exec_success') else 'FAIL'} | {summary.get('row_count', 0)} rows")
-                                elif node == "semantic_check":
-                                    st.caption(f"Semantic: {'PASS' if summary.get('semantic_pass') else 'FAIL'}")
+
+                    elif current_event == "status":
+                        sql_preview = data.get("sql_preview", "") or sql_preview
+                        node = data.get("node", "")
+                        if node and node not in seen_nodes:
+                            seen_nodes.add(node)
+                            node_list.append(node)
+                        if data.get("status") in ("RUNNING",) and not token_buffer:
+                            pass  # waiting for LLM to start streaming
 
                     elif current_event == "complete":
                         progress.empty()
@@ -175,9 +184,10 @@ def _call_api_stream(question: str, db_id: str, database_url: str) -> dict:
                             "node_timings": data.get("node_timings", {}),
                             "raw_response": "",
                         }
-                    elif current_event == "error":
+
+                    elif current_event in ("error", "timeout"):
                         progress.empty()
-                        return {"sql": "", "exec_result": {"success": False, "error": data.get("error", "stream error")},
+                        return {"sql": sql_preview, "exec_result": {"success": False, "error": data.get("error", "task failed")},
                                 "token_usage": {}, "elapsed_ms": 0, "rag_chunks": [], "node_timings": {}, "raw_response": ""}
 
                     current_event = None
@@ -189,6 +199,63 @@ def _call_api_stream(question: str, db_id: str, database_url: str) -> dict:
         progress.empty()
         return {"sql": "", "exec_result": {"success": False, "error": f"Stream error: {e}"},
                 "token_usage": {}, "elapsed_ms": 0, "rag_chunks": [], "node_timings": {}, "raw_response": str(e)}
+
+
+# ── Waterfall chart ──
+
+def _render_waterfall(node_timings: dict):
+    """Interactive Plotly waterfall chart of pipeline node timings."""
+    import plotly.graph_objects as go
+
+    order = ["router", "schema_retriever", "decomposer", "fewshot_selector",
+             "generator", "guard", "voter", "semantic_check", "executor", "refiner"]
+    sorted_nodes = [(n, node_timings.get(n, 0.0)) for n in order if n in node_timings]
+    for n, d in node_timings.items():
+        if n not in order:
+            sorted_nodes.append((n, d))
+
+    if not sorted_nodes:
+        return
+
+    labels = [n for n, _ in sorted_nodes]
+    values = [d for _, d in sorted_nodes]
+    total = sum(values)
+
+    # Color coding
+    color_map = {"generator": "#FF9800", "voter": "#4CAF50",
+                 "refiner": "#E91E63", "router": "#607D8B"}
+    bar_colors = [color_map.get(n, "#2196F3") for n in labels]
+
+    # Build waterfall via go.Bar with per-bar color (Waterfall trace lacks marker.color)
+    hover_texts = [
+        f"<b>{n}</b><br>Duration: {v:.2f}s<br>Share: {v/total*100:.1f}%<br>Cumulative: {sum(values[:i+1]):.2f}s"
+        for i, (n, v) in enumerate(zip(labels, values))
+    ]
+    base = [sum(values[:i]) for i in range(len(values))]
+
+    fig = go.Figure(go.Bar(
+        name="Pipeline",
+        x=labels,
+        y=values,
+        base=base,
+        text=[f"{v:.2f}s" for v in values],
+        textposition="outside",
+        hovertext=hover_texts,
+        hoverinfo="text",
+        marker={"color": bar_colors, "line": {"color": "#fff", "width": 1}},
+    ))
+
+    fig.update_layout(
+        title={"text": "Pipeline Node Timings (Waterfall)", "font": {"size": 16}},
+        xaxis_title="Node",
+        yaxis_title="Seconds",
+        showlegend=False,
+        height=400,
+        margin={"t": 40, "b": 60, "l": 60, "r": 20},
+        hovermode="x unified",
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
 
 
 # ── Result rendering ──
@@ -237,9 +304,7 @@ def render_result(result: dict, question: str):
             st.metric("Total Time", f"{elapsed/1000:.1f}s" if elapsed > 1000 else f"{elapsed:.0f}ms")
 
         if node_timings:
-            st.caption("Node timings:")
-            for node, dur in sorted(node_timings.items(), key=lambda x: -x[1]):
-                st.text(f"  {node}: {dur:.2f}s")
+            _render_waterfall(node_timings)
 
     with tab4:
         if rag_chunks:
@@ -386,11 +451,9 @@ def render_query():
 
         with st.chat_message("assistant"):
             with st.spinner("Running pipeline..."):
-                result = _call_api_stream(question, db.db_id, db.database_url)
+                result = _call_api_async(question, db.db_id, db.database_url)
 
-            render_result(result, question)
-
-            # Save to history
+            # Save to history first — so rendering errors don't lose the result
             sql = result.get("sql", "")
             exec_result = result.get("exec_result")
             status = "ok" if (exec_result and exec_result.get("success")) else "fail"
@@ -407,6 +470,11 @@ def render_query():
                 "db_name": st.session_state.selected_db_name,
                 "db_id": db.db_id,
             })
+
+            try:
+                render_result(result, question)
+            except Exception as e:
+                st.error(f"Render error: {e}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

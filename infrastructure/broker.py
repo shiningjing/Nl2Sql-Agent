@@ -26,7 +26,7 @@ ALL_TOPICS = [TOPIC_REQUEST, TOPIC_STATUS, TOPIC_RESULT, TOPIC_DLQ]
 
 # ── Connection config ─────────────────────────────────────────────────────────
 
-KAFKA_BOOTSTRAP = "localhost:9092"
+KAFKA_BOOTSTRAP = "127.0.0.1:9092"
 KAFKA_DEFAULT_TIMEOUT_MS = 5000
 
 

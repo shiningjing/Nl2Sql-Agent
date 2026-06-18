@@ -101,6 +101,7 @@ Tracing / Metrics / Logs
 #### 任务 1：代码结构重构（1.5 天）
 
 **现状**：
+
 - `nl2sql/` — 8 个文件混杂了检索、执行、工具、配置
 - `src/` — agent、api、eval、retrieval、obs、guardrails，检索逻辑与 `nl2sql/rag_retrieve.py` 分散
 - `nl2sql/schema.py` 和 `src/retrieval/` 存在两条 schema 获取路径
@@ -126,19 +127,19 @@ data-agent-ops/
 
 **子任务**：
 
-| # | 子任务 | 内容 | 风险 |
-|---|--------|------|------|
-| 1.1 | 目录创建 | 建 10 个顶层目录，每个放 `__init__.py` | 低 |
-| 1.2 | `agent/` 迁移 | `src/agent/*` → `agent/`，`nl2sql/generate.py` → `agent/generator_llm.py` | 低 |
-| 1.3 | `api/` 迁移 | `src/api/*` → `api/`，路径重新布线 | 中 — import 路径全改 |
-| 1.4 | `retrieval/` 合并 | `src/retrieval/*` + `nl2sql/rag_retrieve.py` + `nl2sql/schema.py` → `retrieval/` | 中 — 消除 schema 获取的两条路径 |
-| 1.5 | `tools/` 新建 | `nl2sql/execute.py` → `tools/sql_executor.py`，预留 `tools/mcp_client.py` | 低 |
-| 1.6 | `guard/` 迁移 | `src/guardrails/` → `guard/`，`nl2sql/pipeline.py` 错误分类 → `guard/error_classifier.py` | 低 |
-| 1.7 | `evaluation/` 迁移 | `src/eval/*` → `evaluation/` | 低 |
-| 1.8 | `observability/` 新建 | `src/obs/` → `observability/`，保留老 TraceLogger 做过渡 | 低 |
-| 1.9 | `storage/` 新建 | `nl2sql/db_registry.py` → `storage/`，`src/infrastructure/redis_cache.py` → `storage/` | 低 |
-| 1.10 | 全局 import 重布线 | 搜所有 `from nl2sql.` `from src.` 替换为新路径 | 高 — 量大、遗漏风险 |
-| 1.11 | 冒烟验证 | `_smoke_multidb.py` 跑通 + Streamlit UI 正常启动 + BIRD 单题跑通 | — |
+| #    | 子任务                 | 内容                                                                                    | 风险                    |
+| ---- | ------------------- | ------------------------------------------------------------------------------------- | --------------------- |
+| 1.1  | 目录创建                | 建 10 个顶层目录，每个放 `__init__.py`                                                          | 低                     |
+| 1.2  | `agent/` 迁移         | `src/agent/*` → `agent/`，`nl2sql/generate.py` → `agent/generator_llm.py`              | 低                     |
+| 1.3  | `api/` 迁移           | `src/api/*` → `api/`，路径重新布线                                                           | 中 — import 路径全改       |
+| 1.4  | `retrieval/` 合并     | `src/retrieval/*` + `nl2sql/rag_retrieve.py` + `nl2sql/schema.py` → `retrieval/`      | 中 — 消除 schema 获取的两条路径 |
+| 1.5  | `tools/` 新建         | `nl2sql/execute.py` → `tools/sql_executor.py`，预留 `tools/mcp_client.py`                | 低                     |
+| 1.6  | `guard/` 迁移         | `src/guardrails/` → `guard/`，`nl2sql/pipeline.py` 错误分类 → `guard/error_classifier.py`  | 低                     |
+| 1.7  | `evaluation/` 迁移    | `src/eval/*` → `evaluation/`                                                          | 低                     |
+| 1.8  | `observability/` 新建 | `src/obs/` → `observability/`，保留老 TraceLogger 做过渡                                     | 低                     |
+| 1.9  | `storage/` 新建       | `nl2sql/db_registry.py` → `storage/`，`src/infrastructure/redis_cache.py` → `storage/` | 低                     |
+| 1.10 | 全局 import 重布线       | 搜所有 `from nl2sql.` `from src.` 替换为新路径                                                 | 高 — 量大、遗漏风险           |
+| 1.11 | 冒烟验证                | `_smoke_multidb.py` 跑通 + Streamlit UI 正常启动 + BIRD 单题跑通                                | —                     |
 
 ---
 
@@ -186,11 +187,11 @@ class AgentState(TypedDict):
 
 **子任务**：
 
-| # | 子任务 |
-|---|--------|
-| 2.1 | 定义新增字段，写 TypedDict |
+| #   | 子任务                                                           |
+| --- | ------------------------------------------------------------- |
+| 2.1 | 定义新增字段，写 TypedDict                                            |
 | 2.2 | 在 9 个 LangGraph 节点中接入新字段（每个节点写入自身 token_usage 和 node_latency） |
-| 2.3 | `full_graph.py` 确保新字段在节点间传递 |
+| 2.3 | `full_graph.py` 确保新字段在节点间传递                                   |
 
 ---
 
@@ -200,15 +201,15 @@ class AgentState(TypedDict):
 
 **现状 vs 计划要求**：
 
-| 计划要求的 Span Attribute | TraceLogger 现状 | 做法 |
-|--------------------------|-----------------|------|
-| 输入摘要 | `node_enter` 的 `meta` 参数 | 已有 |
-| 执行时间 | `node_exit` 的 `duration_s` | 已有 |
-| 错误类型 | `node_error` 的 `error_type` | 已有 |
-| 输出状态 (success/error/skipped) | node_exit 和 node_error 是两个独立事件 | **补 status 字段** |
-| Token 用量 | `llm_call` 事件有，但没挂在 node 下 | **补 node 归属** |
-| 模型 | `llm_call` 的 `model` | **补到 node_exit** |
-| prompt 版本 | 完全没有 | **补字段** |
+| 计划要求的 Span Attribute         | TraceLogger 现状                 | 做法               |
+| ---------------------------- | ------------------------------ | ---------------- |
+| 输入摘要                         | `node_enter` 的 `meta` 参数       | 已有               |
+| 执行时间                         | `node_exit` 的 `duration_s`     | 已有               |
+| 错误类型                         | `node_error` 的 `error_type`    | 已有               |
+| 输出状态 (success/error/skipped) | node_exit 和 node_error 是两个独立事件 | **补 status 字段**  |
+| Token 用量                     | `llm_call` 事件有，但没挂在 node 下     | **补 node 归属**    |
+| 模型                           | `llm_call` 的 `model`           | **补到 node_exit** |
+| prompt 版本                    | 完全没有                           | **补字段**          |
 
 **需要补的三个东西**：
 
@@ -246,12 +247,12 @@ class OtelBridge:
 
 **子任务**：
 
-| # | 子任务 |
-|---|--------|
+| #   | 子任务                                                                              |
+| --- | -------------------------------------------------------------------------------- |
 | 3.1 | TraceLogger 补 3 个字段：`status`, `model`, `prompt_version` + `llm_call` 加 `node` 参数 |
-| 3.2 | 写 `observability/otel_bridge.py`：监听 TraceLogger 事件 → 翻译为 OTel span |
-| 3.3 | 安装 OTel 依赖 + Jaeger 容器，验证瀑布图能展示完整节点链路 |
-| 3.4 | FastAPI 中间件注入 `trace_id` → response header（已有机房，补字段即可） |
+| 3.2 | 写 `observability/otel_bridge.py`：监听 TraceLogger 事件 → 翻译为 OTel span               |
+| 3.3 | 安装 OTel 依赖 + Jaeger 容器，验证瀑布图能展示完整节点链路                                            |
+| 3.4 | FastAPI 中间件注入 `trace_id` → response header（已有机房，补字段即可）                           |
 
 **LLM 调用的时间和 token 用量也通过 OTel Bridge 绑定到当前 Span**
 
@@ -266,34 +267,35 @@ class OtelBridge:
 **现状**：`scripts/eval_bird.py` 已有 `--test` 和 `--exp ablation` 模式，`src/eval/metrics.py` 有 `exec_match` 和 `VES`。缺的是**统一入口 + 完整输出 + 报告格式化**。
 
 **目标命令**：
+
 ```bash
 python -m evaluation.run --config R5 --samples 100 --output reports/
 ```
 
 **输出指标**：
 
-| 指标 | 当前是否已有 |
-|------|-------------|
-| EX accuracy | ✅ exec_match |
-| VES | ✅ VES |
-| SQL execution success rate | ❌ |
-| First-pass success rate | ❌ |
-| Repair success rate | ❌ |
-| Average repair count | ❌ |
-| Average latency | ❌ |
-| P95 latency | ❌ |
-| Average token consumption | ❌ |
+| 指标                         | 当前是否已有       |
+| -------------------------- | ------------ |
+| EX accuracy                | ✅ exec_match |
+| VES                        | ✅ VES        |
+| SQL execution success rate | ❌            |
+| First-pass success rate    | ❌            |
+| Repair success rate        | ❌            |
+| Average repair count       | ❌            |
+| Average latency            | ❌            |
+| P95 latency                | ❌            |
+| Average token consumption  | ❌            |
 
 **子任务**：
 
-| # | 子任务 |
-|---|--------|
-| 4.1 | 写 `evaluation/reporter.py` — 统一收集每条评测的详细结果：SQL、执行时间、token、错误类型、修复次数、成功/失败 |
+| #   | 子任务                                                                                                                  |
+| --- | -------------------------------------------------------------------------------------------------------------------- |
+| 4.1 | 写 `evaluation/reporter.py` — 统一收集每条评测的详细结果：SQL、执行时间、token、错误类型、修复次数、成功/失败                                            |
 | 4.2 | 扩展 `evaluation/metrics.py` — 补充 execution_success_rate、first_pass_rate、repair_success_rate、avg/P95 latency、avg token |
-| 4.3 | 改造 `evaluation/run.py`（新文件）为统一入口，支持 `--config`, `--samples`, `--output`, `--format json|csv` |
-| 4.4 | JSON 报告格式设计 + CSV 导出 |
-| 4.5 | 跑一次 BIRD 500 题全量 → 生成基线报告 `reports/baseline_W1.json` |
-| 4.6 | 保留老 `scripts/eval_bird.py` 兼容调用，加上 deprecation warning |
+| 4.3 | 改造 `evaluation/run.py`（新文件）为统一入口，支持 `--config`, `--samples`, `--output`, `--format json                              |
+| 4.4 | JSON 报告格式设计 + CSV 导出                                                                                                 |
+| 4.5 | 跑一次 BIRD 500 题全量 → 生成基线报告 `reports/baseline_W1.json`                                                                 |
+| 4.6 | 保留老 `scripts/eval_bird.py` 兼容调用，加上 deprecation warning                                                               |
 
 ---
 
@@ -301,13 +303,13 @@ python -m evaluation.run --config R5 --samples 100 --output reports/
 
 > W1 最关键的卡点：重构后 BIRD EX 不能低于当前 DeepSeek 基线（38.8%）。
 
-| # | 子任务 | 验证项 |
-|---|--------|--------|
-| 5.1 | 多数据库冒烟 | `_smoke_multidb.py` 9 题 × 3 方言全部通过 |
-| 5.2 | UI 全链路 | Streamlit 提交查询 → 返回 SQL → 执行 → 展示结果 |
-| 5.3 | API 接口 | FastAPI `/api/v1/query` 正常返回 |
-| 5.4 | BIRD 抽测 | 100 题抽测 EX ≥ 36%（允许 2pp 波动，DeepSeek 基线 38.8%） |
-| 5.5 | Trace 对比 | 对比重构前后的 trace 日志，确认节点输出一致 |
+| #   | 子任务      | 验证项                                           |
+| --- | -------- | --------------------------------------------- |
+| 5.1 | 多数据库冒烟   | `_smoke_multidb.py` 9 题 × 3 方言全部通过            |
+| 5.2 | UI 全链路   | Streamlit 提交查询 → 返回 SQL → 执行 → 展示结果           |
+| 5.3 | API 接口   | FastAPI `/api/v1/query` 正常返回                  |
+| 5.4 | BIRD 抽测  | 100 题抽测 EX ≥ 36%（允许 2pp 波动，DeepSeek 基线 38.8%） |
+| 5.5 | Trace 对比 | 对比重构前后的 trace 日志，确认节点输出一致                     |
 
 ---
 

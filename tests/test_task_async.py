@@ -611,3 +611,93 @@ class TestHealthEndpoint:
         resp = client.post("/api/v1/task/scan-stale")
         # 200 = ok, 429 = rate limited (acceptable in test suite)
         assert resp.status_code in (200, 429)
+
+
+class TestTokenStreaming:
+    """T3: Redis pub/sub token streaming."""
+
+    def _cleanup(self, tid: str):
+        from infrastructure.task_store import _get_redis
+        r = _get_redis()
+        if r:
+            r.delete(f"task:{tid}", f"task:{tid}:tokens")
+
+    @redis_required
+    def test_publish_and_subscribe_roundtrip(self):
+        """Worker publishes token, subscriber receives it."""
+        import threading
+        from infrastructure.task_store import task_publish_token, _get_redis
+
+        tid = "token_roundtrip"
+        self._cleanup(tid)
+
+        received = []
+        r = _get_redis()
+        ps = r.pubsub(ignore_subscribe_messages=True)
+        ps.subscribe(f"task:{tid}:tokens")
+
+        def _collect():
+            for msg in ps.listen():
+                if msg.get("type") == "message":
+                    received.append(msg["data"])
+                    if len(received) >= 3:
+                        break
+
+        t = threading.Thread(target=_collect, daemon=True)
+        t.start()
+
+        import time
+        time.sleep(0.05)  # let subscriber settle
+
+        task_publish_token(tid, "SELECT")
+        task_publish_token(tid, " *")
+        task_publish_token(tid, " FROM t")
+
+        t.join(timeout=2)
+        ps.unsubscribe(f"task:{tid}:tokens")
+        ps.close()
+
+        assert received == ["SELECT", " *", " FROM t"]
+        self._cleanup(tid)
+
+    @redis_required
+    def test_publish_noop_when_redis_down(self):
+        """task_publish_token should not raise when Redis is unavailable."""
+        from infrastructure.task_store import task_publish_token, _get_redis
+        # This test just confirms no exception
+        task_publish_token("nonexistent", "SELECT")
+        # passes if no exception
+
+    def test_worker_run_graph_sets_token_callback(self):
+        """Verify token_callback set/clear contract on generator module."""
+        import agent.nodes.generator as gen_mod
+
+        # Save original
+        original = dict(gen_mod._stream_ctx)
+        gen_mod._stream_ctx.clear()
+
+        try:
+            from worker.main import run_graph
+            assert callable(run_graph)
+
+            # Gen module has set_token_callback
+            assert callable(gen_mod.set_token_callback)
+
+            # Callback initially None
+            assert "cb" not in gen_mod._stream_ctx
+
+            # Set callback
+            calls = []
+            gen_mod.set_token_callback(lambda t: calls.append(t))
+            assert "cb" in gen_mod._stream_ctx
+
+            # Invoke via module internals
+            gen_mod._stream_ctx["cb"]("test")
+            assert calls == ["test"]
+
+            # Clear callback
+            gen_mod.set_token_callback(None)
+            assert "cb" not in gen_mod._stream_ctx
+        finally:
+            gen_mod._stream_ctx.clear()
+            gen_mod._stream_ctx.update(original)

@@ -140,65 +140,114 @@ def trigger_stale_scan():
 
 @router.get("/task/{task_id}/stream")
 async def task_stream(task_id: str):
-    """SSE stream that polls Redis and pushes state changes.
+    """SSE stream with real-time SQL token push + status polling.
 
-    Reuses the existing Server-Sent Events pattern from /query/full/stream.
+    Tokens arrive via Redis pub/sub (Worker publishes each LLM token).
+    Status updates arrive via Redis polling (500ms interval).
     """
     import asyncio
+    import threading
     from sse_starlette.sse import EventSourceResponse
+    from storage.redis_cache import get_redis
 
     async def event_generator():
-        last_updated = ""
-        last_node = ""
-        # Poll up to 5 minutes
-        for _ in range(600):
-            state = task_get(task_id)
-            if state is None:
-                yield {"event": "error", "data": json.dumps({"error": "Task not found"})}
-                return
+        loop = asyncio.get_event_loop()
+        token_queue: asyncio.Queue = asyncio.Queue()
+        ps_thread = None
+        ps = None
 
-            status = state.get("status", "?")
-            updated = state.get("updated_at", "")
-            node = state.get("node", "")
+        # ── Subscribe to Redis token channel (best-effort) ──
+        r = get_redis()
+        if r is not None:
+            try:
+                ps = r.pubsub(ignore_subscribe_messages=True)
+                ps.subscribe(f"task:{task_id}:tokens")
 
-            # Emit on state change or new node
-            if updated != last_updated:
-                last_updated = updated
-                yield {
-                    "event": "status",
-                    "data": json.dumps({
-                        "status": status,
-                        "progress": state.get("progress", 0),
-                        "node": node,
-                        "sql_preview": (state.get("sql") or "")[:200],
-                        "error": state.get("error"),
-                    }, ensure_ascii=False, default=str),
-                }
+                def _listen():
+                    try:
+                        for msg in ps.listen():
+                            if msg.get("type") == "message":
+                                asyncio.run_coroutine_threadsafe(
+                                    token_queue.put(msg["data"]), loop
+                                )
+                    except Exception:
+                        pass  # Redis connection closed → exit silently
 
-            if node and node != last_node:
-                last_node = node
-                yield {
-                    "event": "node_done",
-                    "data": json.dumps({"node": node}, ensure_ascii=False),
-                }
+                ps_thread = threading.Thread(target=_listen, daemon=True, name=f"ps-{task_id}")
+                ps_thread.start()
+            except Exception:
+                ps = None  # Redis pub/sub unavailable → fall back to status-only
 
-            if status in ("SUCCESS", "FAILED", "TIMEOUT", "CANCELLED"):
-                yield {
-                    "event": "complete",
-                    "data": json.dumps({
-                        "status": status,
-                        "sql": state.get("sql", ""),
-                        "exec_result": state.get("exec_result"),
-                        "token_usage": state.get("token_usage", {}),
-                        "node_timings": state.get("node_timings", {}),
-                        "error": state.get("error"),
-                    }, ensure_ascii=False, default=str),
-                }
-                return
+        try:
+            last_updated = ""
+            last_node = ""
+            deadline = asyncio.get_event_loop().time() + 300  # 5 min max
 
-            await asyncio.sleep(0.5)
+            while asyncio.get_event_loop().time() < deadline:
+                # ── Wait for token or timeout ──
+                try:
+                    token = await asyncio.wait_for(token_queue.get(), timeout=0.5)
+                    yield {
+                        "event": "token",
+                        "data": json.dumps({"text": token}, ensure_ascii=False),
+                    }
+                    continue  # token arrived, check for more before polling
+                except asyncio.TimeoutError:
+                    pass  # no token, fall through to status poll
 
-        # Timeout — task still running after 5 min
-        yield {"event": "timeout", "data": json.dumps({"error": "Stream timeout (5 min)"})}
+                # ── Status poll ──
+                state = task_get(task_id)
+                if state is None:
+                    yield {"event": "error", "data": json.dumps({"error": "Task not found"})}
+                    return
+
+                status = state.get("status", "?")
+                updated = state.get("updated_at", "")
+                node = state.get("node", "")
+
+                # Emit on state change
+                if updated != last_updated:
+                    last_updated = updated
+                    yield {
+                        "event": "status",
+                        "data": json.dumps({
+                            "status": status,
+                            "progress": state.get("progress", 0),
+                            "node": node,
+                            "sql_preview": (state.get("sql") or "")[:200],
+                            "error": state.get("error"),
+                        }, ensure_ascii=False, default=str),
+                    }
+
+                if node and node != last_node:
+                    last_node = node
+                    yield {
+                        "event": "node_done",
+                        "data": json.dumps({"node": node}, ensure_ascii=False),
+                    }
+
+                if status in ("SUCCESS", "FAILED", "TIMEOUT", "CANCELLED"):
+                    yield {
+                        "event": "complete",
+                        "data": json.dumps({
+                            "status": status,
+                            "sql": state.get("sql", ""),
+                            "exec_result": state.get("exec_result"),
+                            "token_usage": state.get("token_usage", {}),
+                            "node_timings": state.get("node_timings", {}),
+                            "error": state.get("error"),
+                        }, ensure_ascii=False, default=str),
+                    }
+                    return
+
+            # Timeout — task still running after 5 min
+            yield {"event": "timeout", "data": json.dumps({"error": "Stream timeout (5 min)"})}
+        finally:
+            if ps is not None:
+                try:
+                    ps.unsubscribe(f"task:{task_id}:tokens")
+                    ps.close()
+                except Exception:
+                    pass
 
     return EventSourceResponse(event_generator())

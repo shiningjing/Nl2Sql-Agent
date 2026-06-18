@@ -27,7 +27,7 @@ from infrastructure.broker import (
 from infrastructure.task_store import (
     task_create, task_get, task_update, task_transition,
     task_is_cancelled, task_clear_cancel,
-    task_heartbeat, get_task_timeout,
+    task_heartbeat, task_publish_token, get_task_timeout,
     HEARTBEAT_INTERVAL_S,
 )
 
@@ -67,35 +67,46 @@ def run_graph(task_id: str, payload: dict) -> dict:
     broker = get_broker()
     accumulated = dict(initial_state)
 
-    # Stream mode: yield each node's output, merge into accumulated state
-    for step in graph.stream(initial_state, stream_mode="updates"):
-        # Check cancel flag before each node
-        if task_is_cancelled(task_id):
-            _log.info("Task %s cancelled mid-execution", task_id)
-            task_transition(task_id, "CANCELLED")
-            broker.publish(TOPIC_STATUS, TaskMessage(
-                task_id=task_id, event="cancelled",
-                payload={"node": step.get("_last_node", "?")},
-            ))
-            task_clear_cancel(task_id)
-            return {"_cancelled": True}
+    # Inject token callback for real-time SQL streaming via Redis pub/sub
+    import agent.nodes.generator as gen_mod
 
-        for node_name, node_output in step.items():
-            if isinstance(node_output, dict):
-                accumulated.update(node_output)
+    def _on_token(text: str):
+        task_publish_token(task_id, text)
 
-            # Publish progress
-            summary = _summarize_node(node_name, accumulated)
-            broker.publish(TOPIC_STATUS, TaskMessage(
-                task_id=task_id, event="node_done",
-                payload={"node": node_name, "summary": summary},
-            ))
+    gen_mod.set_token_callback(_on_token)
 
-            # Update Redis
-            task_update(task_id, node=node_name, progress=_node_progress(node_name),
-                        sql=accumulated.get("sql") or accumulated.get("chosen_sql"),
-                        token_usage=accumulated.get("token_usage", {}),
-                        node_timings=accumulated.get("node_latency", {}))
+    try:
+        # Stream mode: yield each node's output, merge into accumulated state
+        for step in graph.stream(initial_state, stream_mode="updates"):
+            # Check cancel flag before each node
+            if task_is_cancelled(task_id):
+                _log.info("Task %s cancelled mid-execution", task_id)
+                task_transition(task_id, "CANCELLED")
+                broker.publish(TOPIC_STATUS, TaskMessage(
+                    task_id=task_id, event="cancelled",
+                    payload={"node": step.get("_last_node", "?")},
+                ))
+                task_clear_cancel(task_id)
+                return {"_cancelled": True}
+
+            for node_name, node_output in step.items():
+                if isinstance(node_output, dict):
+                    accumulated.update(node_output)
+
+                # Publish progress
+                summary = _summarize_node(node_name, accumulated)
+                broker.publish(TOPIC_STATUS, TaskMessage(
+                    task_id=task_id, event="node_done",
+                    payload={"node": node_name, "summary": summary},
+                ))
+
+                # Update Redis
+                task_update(task_id, node=node_name, progress=_node_progress(node_name),
+                            sql=accumulated.get("sql") or accumulated.get("chosen_sql"),
+                            token_usage=accumulated.get("token_usage", {}),
+                            node_timings=accumulated.get("node_latency", {}))
+    finally:
+        gen_mod.set_token_callback(None)
 
     elapsed = round(time.time() - t0, 2)
     accumulated["_worker_elapsed"] = elapsed
