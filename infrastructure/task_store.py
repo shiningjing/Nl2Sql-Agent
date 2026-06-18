@@ -78,10 +78,13 @@ def task_update(task_id: str, **kwargs) -> dict | None:
 
 
 def task_transition(task_id: str, status: str, **extra) -> dict | None:
-    """Set status + optional fields. Validates legal state transitions."""
-    valid = _valid_transition(task_get(task_id), status)
+    """Set status + optional fields. Blocks illegal state transitions."""
+    current = task_get(task_id)
+    cur_status = current.get("status", "PENDING") if current else None
+    valid = _valid_transition(current, status)
     if not valid:
-        _log.warning("Illegal state transition for %s → %s", task_id, status)
+        _log.warning("Illegal state transition for %s: %s → %s (blocked)", task_id, cur_status, status)
+        return current
     return task_update(task_id, status=status, **extra)
 
 
