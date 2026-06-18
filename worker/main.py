@@ -12,8 +12,10 @@ import logging
 import os
 import signal
 import sys
+import threading
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
 # Ensure project root is on path (for python -m worker.main)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -25,11 +27,12 @@ from infrastructure.broker import (
 from infrastructure.task_store import (
     task_create, task_get, task_update, task_transition,
     task_is_cancelled, task_clear_cancel,
+    task_heartbeat, get_task_timeout,
+    HEARTBEAT_INTERVAL_S,
 )
 
 _log = logging.getLogger("nl2sql.worker")
 MAX_RETRIES = 3
-TASK_TIMEOUT_S = 120
 
 
 # ── LangGraph runner ─────────────────────────────────────────────────────────
@@ -173,10 +176,11 @@ def _sanitize(result: dict | None) -> dict | None:
 # ── Message handler ──────────────────────────────────────────────────────────
 
 def handle_task(msg: TaskMessage) -> None:
-    """Callback from Kafka consumer — run the task pipeline."""
+    """Callback from Kafka consumer — run the task pipeline with heartbeat and timeout."""
     task_id = msg.task_id
     payload = msg.payload
     retry_count = payload.get("_retry_count", 0)
+    timeout_s = get_task_timeout(retry_count)
 
     # Check if cancelled before starting
     if task_is_cancelled(task_id):
@@ -184,15 +188,41 @@ def handle_task(msg: TaskMessage) -> None:
         _log.info("Task %s cancelled before start", task_id)
         return
 
-    task_transition(task_id, "RUNNING")
+    task_transition(task_id, "RUNNING", retry_count=retry_count)
     broker = get_broker()
     broker.publish(TOPIC_STATUS, TaskMessage(
         task_id=task_id, event="running",
+        payload={"retry_count": retry_count, "timeout_s": timeout_s},
     ))
 
+    # Background heartbeat thread — keeps ticking even if Graph/SQL blocks
+    heartbeat_stop = threading.Event()
+
+    def _heartbeat_loop():
+        while not heartbeat_stop.is_set():
+            task_heartbeat(task_id)
+            heartbeat_stop.wait(HEARTBEAT_INTERVAL_S)
+
+    hb_thread = threading.Thread(target=_heartbeat_loop, daemon=True, name=f"hb-{task_id}")
+    hb_thread.start()
+
     try:
-        run_graph(task_id, payload)
-        task_transition(task_id, "SUCCESS")
+        pool = ThreadPoolExecutor(max_workers=1)
+        try:
+            fut = pool.submit(run_graph, task_id, payload)
+            fut.result(timeout=timeout_s)
+            task_transition(task_id, "SUCCESS")
+        except FutureTimeoutError:
+            _log.warning("Task %s timed out after %ds (retry %d)",
+                        task_id, timeout_s, retry_count)
+            task_transition(task_id, "TIMEOUT",
+                            error=f"Task timed out after {timeout_s}s")
+            broker.publish(TOPIC_STATUS, TaskMessage(
+                task_id=task_id, event="timeout",
+                payload={"retry_count": retry_count, "timeout_s": timeout_s},
+            ))
+        finally:
+            pool.shutdown(wait=False)
     except Exception as e:
         err_msg = f"{type(e).__name__}: {str(e)[:300]}"
         _log.error("Task %s failed (attempt %d/%d): %s",
@@ -220,6 +250,9 @@ def handle_task(msg: TaskMessage) -> None:
                 payload={"original_payload": payload, "error": err_msg,
                          "traceback": traceback.format_exc()[-2000:]},
             ))
+    finally:
+        heartbeat_stop.set()
+        hb_thread.join(timeout=2)
 
 
 # ── Main loop ────────────────────────────────────────────────────────────────

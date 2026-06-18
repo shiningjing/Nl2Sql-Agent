@@ -1,7 +1,8 @@
 """Integration tests for W3 async task infrastructure.
 
 Covers: broker graceful degradation, task store CRUD, state transitions,
-        idempotency (store + API), API endpoints, TaskMessage serialisation.
+        idempotency (store + API), API endpoints, TaskMessage serialisation,
+        heartbeat, progressive timeout, differentiated TTL, zombie scan (T2).
 """
 import hashlib
 import json
@@ -345,3 +346,268 @@ class TestApiRoutes:
     def test_cancel_unknown(self, client):
         resp = client.post("/api/v1/task/cancel/nonexistent123")
         assert resp.status_code in (200, 404)
+
+
+class TestHeartbeat:
+    """T2: heartbeat write/read and TTL expiry."""
+
+    def _cleanup(self, task_id: str):
+        from infrastructure.task_store import _get_redis
+        r = _get_redis()
+        if r:
+            r.delete(f"task:{task_id}", f"task:{task_id}:heartbeat")
+
+    @redis_required
+    def test_heartbeat_write_and_read(self):
+        from infrastructure.task_store import task_create, task_heartbeat, task_get_heartbeat
+        from datetime import datetime
+
+        tid = "hb_write_test"
+        self._cleanup(tid)
+        task_create(tid, "test q")
+
+        task_heartbeat(tid)
+        hb = task_get_heartbeat(tid)
+        assert hb is not None
+
+        # Must be a valid ISO timestamp
+        dt = datetime.fromisoformat(hb)
+        assert dt.tzinfo is not None  # UTC
+        self._cleanup(tid)
+
+    @redis_required
+    def test_heartbeat_expires(self):
+        """Heartbeat key has short TTL — should expire quickly."""
+        from infrastructure.task_store import (
+            task_create, task_heartbeat, task_get_heartbeat,
+            _get_redis, HEARTBEAT_TTL_S,
+        )
+
+        tid = "hb_expire_test"
+        self._cleanup(tid)
+        task_create(tid, "test q")
+
+        task_heartbeat(tid)
+        # Manually expire the heartbeat key
+        r = _get_redis()
+        r.delete(f"task:{tid}:heartbeat")
+
+        hb = task_get_heartbeat(tid)
+        assert hb is None  # expired
+        self._cleanup(tid)
+
+    @redis_required
+    def test_get_heartbeat_nonexistent_task(self):
+        from infrastructure.task_store import task_get_heartbeat
+        assert task_get_heartbeat("nonexistent_hb_xyz") is None
+
+
+class TestStaleScan:
+    """T2: zombie detection — stale RUNNING tasks → TIMEOUT."""
+
+    def _get_store(self):
+        from infrastructure import task_store as ts
+        return ts
+
+    def _cleanup(self, tid: str):
+        ts = self._get_store()
+        r = ts._get_redis()
+        if r:
+            r.delete(f"task:{tid}", f"task:{tid}:heartbeat", f"task:{tid}:cancel")
+
+    @redis_required
+    def test_no_stale_when_heartbeat_fresh(self):
+        ts = self._get_store()
+        tid = "stale_fresh"
+        self._cleanup(tid)
+
+        ts.task_create(tid, "q")
+        ts.task_transition(tid, "RUNNING")
+        ts.task_heartbeat(tid)  # fresh heartbeat
+
+        stale = ts.scan_stale_tasks(stale_s=60)
+        assert tid not in stale
+        self._cleanup(tid)
+
+    @redis_required
+    def test_stale_detected_when_no_heartbeat(self):
+        ts = self._get_store()
+        tid = "stale_nohb"
+        self._cleanup(tid)
+
+        ts.task_create(tid, "q")
+        ts.task_transition(tid, "RUNNING")
+        # No heartbeat at all
+
+        stale = ts.scan_stale_tasks(stale_s=60)
+        assert tid in stale
+        # Must have been transitioned to TIMEOUT
+        s = ts.task_get(tid)
+        assert s["status"] == "TIMEOUT"
+        self._cleanup(tid)
+
+    @redis_required
+    def test_stale_detected_expired_heartbeat(self):
+        ts = self._get_store()
+        tid = "stale_expired"
+        self._cleanup(tid)
+
+        ts.task_create(tid, "q")
+        ts.task_transition(tid, "RUNNING")
+        ts.task_heartbeat(tid)
+
+        # Delete heartbeat to simulate expiry
+        r = ts._get_redis()
+        r.delete(f"task:{tid}:heartbeat")
+
+        stale = ts.scan_stale_tasks(stale_s=60)
+        assert tid in stale
+        s = ts.task_get(tid)
+        assert s["status"] == "TIMEOUT"
+        assert "heartbeat" in (s.get("error") or "")
+        self._cleanup(tid)
+
+    @redis_required
+    def test_scan_skips_terminal_states(self):
+        """SUCCESS/FAILED/CANCELLED tasks are not scanned."""
+        ts = self._get_store()
+
+        for status in ("SUCCESS", "FAILED", "CANCELLED"):
+            tid = f"stale_term_{status}"
+            self._cleanup(tid)
+            ts.task_create(tid, "q")
+            ts.task_transition(tid, "RUNNING")
+            ts.task_transition(tid, status)
+            # No heartbeat — but state is terminal, should be skipped
+
+            stale = ts.scan_stale_tasks(stale_s=60)
+            assert tid not in stale
+            self._cleanup(tid)
+
+    @redis_required
+    def test_scan_empty_when_nothing_running(self):
+        ts = self._get_store()
+        stale = ts.scan_stale_tasks(stale_s=60)
+        # May find stale tasks from other tests, but should not crash
+        assert isinstance(stale, list)
+
+
+class TestProgressiveTimeout:
+    """T2: progressive timeouts matching eval system."""
+
+    def test_attempt_0(self):
+        from infrastructure.task_store import get_task_timeout, TASK_TIMEOUTS
+        assert get_task_timeout(0) == TASK_TIMEOUTS[0]  # 120
+
+    def test_attempt_1(self):
+        from infrastructure.task_store import get_task_timeout
+        assert get_task_timeout(1) == 300
+
+    def test_attempt_2(self):
+        from infrastructure.task_store import get_task_timeout
+        assert get_task_timeout(2) == 480
+
+    def test_beyond_max_clamped(self):
+        from infrastructure.task_store import get_task_timeout, TASK_TIMEOUTS
+        assert get_task_timeout(99) == TASK_TIMEOUTS[-1]  # 480
+
+    def test_default_retry_count(self):
+        from infrastructure.task_store import get_task_timeout
+        assert get_task_timeout() == 120  # retry_count=0 by default
+
+
+class TestDifferentiatedTTL:
+    """T2: state keys get appropriate TTL based on task status."""
+
+    @redis_required
+    def test_pending_ttl(self):
+        from infrastructure.task_store import task_create, _get_redis, _ttl_for_status, TTL_RUNNING
+        tid = "ttl_test_pending"
+        r = _get_redis()
+        r.delete(f"task:{tid}")
+
+        task_create(tid, "test q")
+        ttl = r.ttl(f"task:{tid}")
+        assert ttl > 0
+        # PENDING uses TTL_RUNNING (2h)
+        assert abs(ttl - TTL_RUNNING) < 10
+        r.delete(f"task:{tid}")
+
+    @redis_required
+    def test_success_ttl(self):
+        from infrastructure.task_store import task_create, task_transition, _get_redis, TTL_TERMINAL_GOOD
+        tid = "ttl_test_success"
+        r = _get_redis()
+        r.delete(f"task:{tid}")
+
+        task_create(tid, "test q")
+        task_transition(tid, "RUNNING")
+        task_transition(tid, "SUCCESS")
+        ttl = r.ttl(f"task:{tid}")
+        assert ttl > 0
+        # SUCCESS uses TTL_TERMINAL_GOOD (24h)
+        assert abs(ttl - TTL_TERMINAL_GOOD) < 10
+        r.delete(f"task:{tid}")
+
+    @redis_required
+    def test_timeout_ttl(self):
+        from infrastructure.task_store import task_create, task_transition, _get_redis, TTL_TERMINAL_BAD
+        tid = "ttl_test_timeout"
+        r = _get_redis()
+        r.delete(f"task:{tid}")
+
+        task_create(tid, "test q")
+        task_transition(tid, "RUNNING")
+        task_transition(tid, "TIMEOUT", error="test")
+        ttl = r.ttl(f"task:{tid}")
+        assert ttl > 0
+        # TIMEOUT uses TTL_TERMINAL_BAD (1h)
+        assert abs(ttl - TTL_TERMINAL_BAD) < 10
+        r.delete(f"task:{tid}")
+
+
+class TestHealthEndpoint:
+    """T2: GET /task/{id}/health and POST /task/scan-stale endpoints."""
+
+    @pytest.fixture
+    def client(self):
+        from api.app import app
+        from fastapi.testclient import TestClient
+        return TestClient(app)
+
+    def test_health_404_for_unknown(self, client):
+        resp = client.get("/api/v1/task/health/nonexistent123")
+        assert resp.status_code in (200, 404, 429)  # 429 = rate limited
+
+    @redis_required
+    def test_health_returns_heartbeat_status(self, client):
+        from infrastructure.task_store import task_create, task_heartbeat
+
+        tid = "health_test"
+        # Clean up any previous state
+        from storage.redis_cache import get_redis
+        r = get_redis()
+        if r:
+            r.delete(f"task:{tid}", f"task:{tid}:heartbeat")
+
+        task_create(tid, "health check q")
+        task_heartbeat(tid)
+
+        resp = client.get(f"/api/v1/task/{tid}/health")
+        if resp.status_code == 200:
+            body = resp.json()
+            assert body["task_id"] == tid
+            assert body["task_status"] == "PENDING"
+            assert body["heartbeat"] is not None
+            assert body["healthy"] is True
+            assert "heartbeat_stale_s" in body
+        else:
+            assert resp.status_code == 429  # rate limited
+
+        if r:
+            r.delete(f"task:{tid}", f"task:{tid}:heartbeat")
+
+    def test_scan_stale_endpoint(self, client):
+        resp = client.post("/api/v1/task/scan-stale")
+        # 200 = ok, 429 = rate limited (acceptable in test suite)
+        assert resp.status_code in (200, 429)

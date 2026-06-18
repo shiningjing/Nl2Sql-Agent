@@ -21,7 +21,9 @@ from api.models import (
 from infrastructure.broker import TaskMessage, TOPIC_REQUEST, get_broker
 from infrastructure.task_store import (
     task_create, task_get, task_request_cancel,
+    task_get_heartbeat, scan_stale_tasks,
     idempotent_check, idempotent_set,
+    HEARTBEAT_STALE_S,
 )
 
 router = APIRouter()
@@ -93,6 +95,47 @@ def task_cancel(task_id: str):
         return TaskCancelResponse(task_id=task_id, status=state["status"])
     task_request_cancel(task_id)
     return TaskCancelResponse(task_id=task_id, status="cancelled")
+
+
+@router.get("/task/{task_id}/health")
+def task_health(task_id: str):
+    """Return heartbeat health for a task (worker liveness check)."""
+    from datetime import datetime, timezone
+
+    state = task_get(task_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Task not found or expired")
+
+    status = state.get("status", "?")
+    hb = task_get_heartbeat(task_id)
+
+    healthy = False
+    stale_s = None
+
+    if hb:
+        try:
+            hb_dt = datetime.fromisoformat(hb)
+            elapsed = (datetime.now(timezone.utc) - hb_dt).total_seconds()
+            healthy = elapsed < HEARTBEAT_STALE_S
+            stale_s = round(elapsed, 1)
+        except (ValueError, TypeError):
+            healthy = False
+
+    return {
+        "task_id": task_id,
+        "task_status": status,
+        "heartbeat": hb,
+        "heartbeat_stale_s": stale_s,
+        "healthy": healthy,
+        "worker_alive": healthy and status == "RUNNING",
+    }
+
+
+@router.post("/task/scan-stale")
+def trigger_stale_scan():
+    """Manually trigger a stale task scan (returns list of timed-out task IDs)."""
+    stale = scan_stale_tasks()
+    return {"stale_count": len(stale), "stale_task_ids": stale}
 
 
 @router.get("/task/{task_id}/stream")
