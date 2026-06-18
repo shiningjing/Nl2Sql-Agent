@@ -181,95 +181,93 @@ def _format_review_feedback(result: dict) -> str:
     return "\n".join(parts)
 
 
-def _classify_exec_error(error_msg: str) -> tuple[str, str]:
-    """Classify execution error and return (hint_type, specific_hint).
+def classify_exec_error(error_msg: str) -> tuple[str, str]:
+    """Classify execution error and return (ErrorType, hint_message).
 
     Recognises SQLite, MySQL, and PostgreSQL error message patterns.
     """
     import re
+    from guard.error_types import ErrorType
     lower = error_msg.lower()
 
     # ── Missing column ──
-    # SQLite:  "no such column: <name>"
-    # MySQL:   "Unknown column '<name>' in '...'"
-    # PG:      "column \"<name>\" does not exist" / "column <table>.<name> does not exist"
     if "no such column:" in lower:
         col = error_msg.split("no such column:")[-1].strip()
-        return ("missing_column",
+        return (ErrorType.MISSING_COLUMN,
             f"Column '{col}' does not exist. Check the SCHEMA section — "
             f"only use column names listed there.")
     if "unknown column" in lower:
         col = error_msg.split("Unknown column")[-1].strip(" '\":;")
         col = col.split("'")[1] if "'" in col else col[:40]
-        return ("missing_column",
+        return (ErrorType.MISSING_COLUMN,
             f"Column '{col}' does not exist in the database. "
             f"Check the SCHEMA section for the correct column name.")
     if "column" in lower and "does not exist" in lower:
-        # PG: column "x" does not exist
         m = re.search(r'column\s+"?([^\s"]+)"?\s+does not exist', lower)
         col = m.group(1) if m else "?"
-        return ("missing_column",
+        return (ErrorType.MISSING_COLUMN,
             f"Column '{col}' does not exist. Check the SCHEMA section — "
             f"only use column names listed there.")
 
     # ── Missing table ──
-    # SQLite:  "no such table: <name>"
-    # MySQL:   "Table '<db>.<name>' doesn't exist"
-    # PG:      "relation \"<name>\" does not exist"
     if "no such table:" in lower:
         tbl = error_msg.split("no such table:")[-1].strip()
-        return ("missing_table",
+        return (ErrorType.MISSING_TABLE,
             f"Table '{tbl}' does not exist. Check the SCHEMA section for the correct table name.")
     if "doesn't exist" in lower and "table" in lower:
         tbl = error_msg.split("Table")[-1].split("'")[1] if "'" in error_msg else "?"
-        return ("missing_table",
+        return (ErrorType.MISSING_TABLE,
             f"Table '{tbl}' does not exist. Check the SCHEMA section for the correct table name.")
     if "relation" in lower and "does not exist" in lower:
         m = re.search(r'relation\s+"?([^\s"]+)"?\s+does not exist', lower)
         tbl = m.group(1) if m else "?"
-        return ("missing_table",
+        return (ErrorType.MISSING_TABLE,
             f"Table/relation '{tbl}' does not exist. Check the SCHEMA section.")
 
     # ── Ambiguous column ──
     if "ambiguous column name:" in lower:
         col = error_msg.split("ambiguous column name:")[-1].strip()
-        return ("ambiguous_column",
+        return (ErrorType.AMBIGUOUS_COLUMN,
             f"Column '{col}' exists in multiple tables. "
             f"Qualify it with the table name or alias (e.g., orders.{col}).")
     if "column" in lower and "is ambiguous" in lower:
-        return ("ambiguous_column",
+        return (ErrorType.AMBIGUOUS_COLUMN,
             "A column reference is ambiguous — qualify it with the table name or alias.")
 
     # ── Bad function ──
     if "no such function:" in lower:
         func = error_msg.split("no such function:")[-1].strip()
-        return ("bad_function",
+        return (ErrorType.BAD_FUNCTION,
             f"Function '{func}' is not available. Use an equivalent built-in function for your dialect.")
     if "function" in lower and "does not exist" in lower:
         m = re.search(r'function\s+(\S+)\(', lower)
         func = m.group(1) if m else "?"
-        return ("bad_function",
+        return (ErrorType.BAD_FUNCTION,
             f"Function '{func}()' does not exist. Use an equivalent built-in function for your dialect.")
 
     # ── Syntax error ──
     if "syntax error" in lower or "near" in lower:
-        return ("syntax_error",
+        return (ErrorType.SYNTAX_ERROR,
             "SQL syntax error. Check for: missing commas, unmatched parentheses, "
             "incomplete JOIN ... ON clauses, or missing keywords.")
     if "you have an error in your sql syntax" in lower:
-        return ("syntax_error",
+        return (ErrorType.SYNTAX_ERROR,
             "SQL syntax error. Check for: missing commas, unmatched parentheses, "
             "incomplete JOIN ... ON clauses, or missing keywords.")
 
     # ── GROUP BY / aggregate ──
     if "group by" in lower or "aggregate" in lower:
-        return ("group_by",
+        return (ErrorType.GROUP_BY_ERROR,
             "GROUP BY error: every non-aggregate column in SELECT must appear in GROUP BY.")
 
-    return ("unknown",
+    return (ErrorType.EXECUTION_ERROR,
         f"SQL execution failed: {error_msg}\n"
         f"Check column names, table names, JOIN conditions, and syntax."
     )
+
+
+# Backwards-compatible alias
+_classify_exec_error = classify_exec_error
 
 
 def _format_exec_error(exec_result: dict, sql: str) -> str:

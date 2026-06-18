@@ -162,10 +162,11 @@ def generate_sql(
     raw = response.content
     token_usage = _extract_token_usage(response)
     sql = extract_sql(raw)
-    valid, reason = validate_sql(sql)
 
-    if not valid:
-        # Treat validation failure like a format error
+    from guard.safety_rules import check_safety
+    safety = check_safety(sql)
+    if not safety["valid"]:
+        reason = safety["issues"][0]["detail"] if safety["issues"] else "Unknown"
         raw = f"Validation failed: {reason}\n\nOriginal response:\n{raw}"
         sql = ""
 

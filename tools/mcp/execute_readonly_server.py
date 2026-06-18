@@ -27,6 +27,7 @@ if _PROJECT_ROOT not in sys.path:
 
 from fastmcp import FastMCP
 from guard.safety_rules import check_safety
+from guard.error_types import ErrorType
 
 mcp = FastMCP("execute-readonly-sql")
 
@@ -53,21 +54,21 @@ def _validate_input(sql: str, dialect: str, max_rows: int, timeout_ms: int) -> d
     """Validate all inputs before execution. Returns error dict or None if OK."""
     if not sql or not sql.strip():
         return {
-            "success": False, "error": "SQL is empty.", "error_type": "INVALID_INPUT",
+            "success": False, "error": "SQL is empty.", "error_type": ErrorType.INVALID_INPUT,
             "data": None, "columns": None, "row_count": 0, "execution_ms": 0,
         }
     if max_rows > _MAX_ROWS_HARD_CAP:
         return {
             "success": False,
             "error": f"max_rows {max_rows} exceeds hard limit {_MAX_ROWS_HARD_CAP}.",
-            "error_type": "INVALID_INPUT",
+            "error_type": ErrorType.INVALID_INPUT,
             "data": None, "columns": None, "row_count": 0, "execution_ms": 0,
         }
     if timeout_ms > 120_000:
         return {
             "success": False,
             "error": f"timeout_ms {timeout_ms} exceeds hard limit 120000.",
-            "error_type": "INVALID_INPUT",
+            "error_type": ErrorType.INVALID_INPUT,
             "data": None, "columns": None, "row_count": 0, "execution_ms": 0,
         }
 
@@ -77,7 +78,7 @@ def _validate_input(sql: str, dialect: str, max_rows: int, timeout_ms: int) -> d
         return {
             "success": False,
             "error": f"SQL validation failed: {safety['issues'][0]['detail']}",
-            "error_type": "SQL_VALIDATION_FAILED",
+            "error_type": ErrorType.SQL_VALIDATION,
             "data": None, "columns": None, "row_count": 0, "execution_ms": 0,
         }
     return None
@@ -136,9 +137,9 @@ def _do_execute(sql: str, database_url: str, dialect: str,
     except Exception as e:
         elapsed_ms = int((time.time() - t0) * 1000)
         error_msg = str(e)[:500]
-        error_type = "EXECUTION_ERROR"
+        error_type = ErrorType.EXECUTION_ERROR
         if "timeout" in error_msg.lower() or "timed out" in error_msg.lower():
-            error_type = "TIMEOUT"
+            error_type = ErrorType.TIMEOUT
         return {
             "success": False,
             "error": error_msg,
@@ -192,7 +193,7 @@ def execute_readonly_sql(
         return {
             "success": False,
             "error": f"Query timeout after {timeout_ms}ms",
-            "error_type": "TIMEOUT",
+            "error_type": ErrorType.TIMEOUT,
             "data": None,
             "columns": None,
             "row_count": 0,

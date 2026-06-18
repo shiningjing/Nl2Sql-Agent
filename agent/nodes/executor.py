@@ -25,6 +25,7 @@ def run_sql(sql: str, timeout_s: int = EXEC_TIMEOUT_S, database_url: str | None 
         return {
             "success": False,
             "error": f"Query timed out after {timeout_s}s",
+            "error_type": "timeout",
             "data": None,
             "columns": None,
             "row_count": 0,

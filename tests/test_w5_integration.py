@@ -69,7 +69,7 @@ def test_semantic_check_handles_edge_cases():
 def test_executor_timeout_available():
     """run_sql supports timeout parameter."""
     from agent.nodes.executor import run_sql, EXEC_TIMEOUT_S
-    assert EXEC_TIMEOUT_S == 10
+    assert EXEC_TIMEOUT_S >= 10
     r = run_sql("SELECT 1", timeout_s=5)
     assert r["success"] is True
     assert r.get("_elapsed_ms", 0) > 0

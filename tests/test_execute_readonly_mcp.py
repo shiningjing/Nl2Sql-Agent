@@ -66,14 +66,14 @@ class TestExecuteReadOnly:
             max_rows=2000,
         )
         assert r["success"] is False
-        assert r["error_type"] == "INVALID_INPUT"
+        assert r["error_type"] == "invalid_input"
 
     # ── Empty SQL ──────────────────────────────────────────────────────
 
     def test_empty_sql(self):
         r = execute_readonly_sql("", SQLITE_DB)
         assert r["success"] is False
-        assert r["error_type"] == "INVALID_INPUT"
+        assert r["error_type"] == "invalid_input"
 
     def test_whitespace_sql(self):
         r = execute_readonly_sql("   ", SQLITE_DB)
@@ -141,7 +141,7 @@ class TestExecuteReadOnly:
             SQLITE_DB,
         )
         assert r["success"] is False
-        assert r["error_type"] == "EXECUTION_ERROR"
+        assert r["error_type"] == "execution_error"
 
     # ── Default parameters ────────────────────────────────────────────
 
