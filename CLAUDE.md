@@ -1,4 +1,4 @@
-# CLAUDE.md — NL2SQL Agent v0.2.7 → DataAgentOps
+# CLAUDE.md — NL2SQL Agent v0.3.0 → DataAgentOps
 
 ## 项目概览
 
@@ -35,7 +35,7 @@ OpenTelemetry → Tracing / Metrics / Logs
 | --- | ---------------- | --------------------------------------------------------- |
 | W1  | 重构 + AgentOps 基础 | 模块化拆分、统一 AgentState、OpenTelemetry 全链路 tracing、BIRD 自动评测脚本 |
 | W2  | MCP 工具 + SQL 安全    | ✅ 2 个 MCP 工具（validate_sql + execute_readonly_sql）、SQL 安全层（9 规则）、统一错误分类、Voter 按需激活     |
-| W3  | 异步任务 + SSE       | Kafka (4 Topic) + Redis 任务状态机、SSE 流式接口、重试/幂等/超时/取消        |
+| W3  | 异步任务 + SSE       | 🏗 Kafka 消息队列 + Worker 独立进程 (T1 ✅)、Redis 任务状态机、SSE 流式、重试/幂等/超时/取消  |
 | W4  | 部署 + 压测 + 文档     | Docker Compose 一键启动、K8s 部署、三类压测（功能/性能/稳定性）、简历材料           |
 
 ### 优先级
@@ -237,6 +237,46 @@ Self-Correction 路径（retry_count > 0）:
 - **API 网关**：Go `go-chi`/`grpc-gateway` 做限流、鉴权、协议转换
 - **Schema 缓存服务**：Go 常驻内存缓存 + gRPC，替代 Python `lru_cache`
 
+## W3 执行计划：异步任务 + SSE 🏗 进行中
+
+### 任务 1：Kafka 消息队列集成 ✅ (v0.3.0)
+
+引入 Kafka 解耦 FastAPI 和 LangGraph 执行，支持异步任务提交。Worker 独立进程消费消息并跑 Graph，FastaPI 写入消息后立即返回 task_id（10ms）。
+
+**新增文件**：
+- `infrastructure/broker.py` — `MessageBroker` 抽象 + `KafkaBroker`（kafka-python，KRaft 无 ZK）
+- `infrastructure/task_store.py` — Redis 任务状态机（PENDING→RUNNING→SUCCESS/FAILED/TIMEOUT/CANCELLED）
+- `worker/main.py` — Worker 独立进程（`python -m worker.main`）
+- `api/routes/task.py` — 4 个异步端点（submit / status / cancel / stream）
+
+**端点**：
+| 端点 | 方法 | 作用 |
+|------|------|------|
+| `/task/submit` | POST | 提交任务 → Kafka → 返回 task_id（202） |
+| `/task/{id}/status` | GET | 从 Redis 读取任务状态 |
+| `/task/{id}/cancel` | POST | 请求取消，Worker 在节点间检查 |
+| `/task/{id}/stream` | GET | SSE 流式推送进度 |
+
+**8 个 Topic**：
+| Topic | 生产者 | 消费者 | 作用 |
+|-------|--------|--------|------|
+| `nl2sql.task.request` | FastAPI | Worker | 任务提交 |
+| `nl2sql.task.status` | Worker | SSE/轮询 | 节点进度 |
+| `nl2sql.task.result` | Worker | SSE/轮询 | 最终结果 |
+| `nl2sql.task.dlq` | Worker | 人工 | 死信（重试耗尽） |
+
+**状态机**：PENDING → RUNNING → SUCCESS / FAILED / TIMEOUT / CANCELLED
+
+**优雅降级**：Kafka 不可用时 publish → False（no-op），Worker 启动失败时系统回退到同步 `/query` 端点。
+
+### 任务 2-4（待实现）
+
+- T2: Redis 任务状态机增强（心跳、TTL 清理）
+- T3: SSE 流式 SQL token 推送（复用 Generator token_callback）
+- T4: 重试/幂等/超时/取消 完善（DLQ 重放、协作式取消）
+
+### 任务 5：集成测试 + BIRD 冒烟（待实现）
+
 ## 技术栈
 
 | 层         | 当前                                   | 升级后新增                       |
@@ -270,23 +310,23 @@ Self-Correction 路径（retry_count > 0）:
 ```
 nl2sql-mini-agent/
   nl2sql/                  # 核心库 (schema, execute, generate, db_registry, rag_retrieve, config, review)
-  src/
     agent/                 # LangGraph 节点 (router, schema_retriever, decomposer, generator, guard, voter, executor, semantic_check, refiner)
       state.py             # AgentState TypedDict
       graphs/full_graph.py # 主图（条件边+循环）
-    eval/                  # BIRD 评测 (bird_loader, metrics, task_manager)
-    prompts.py             # 所有 LLM prompt
-    retrieval/             # RAG 管线 (fk_expand, column_prune, fewshot)
-    api/                   # FastAPI
-    infrastructure/        # Redis 缓存 + LLM 工厂
-    obs/                   # TraceLogger
-    guardrails/            # sqlglot AST 校验
+    evaluation/            # BIRD 评测
+    api/                   # FastAPI (routes: query, eval, task, health)
+    worker/                # Kafka 消费者（独立进程，python -m worker.main）
+    infrastructure/        # broker.py (Kafka 抽象) + task_store.py (Redis 状态机)
+    storage/               # Redis 缓存 + config + db_registry
+    guard/                 # safety_rules + error_types + error_classifier
+    tools/                 # sql_executor + mcp/ (validate_sql + execute_readonly_sql)
+    observability/         # TraceLogger
+    retrieval/             # RAG 管线
   corpus/bird_fewshot/     # Few-shot 示例（按 db_id + 方言）
   scripts/
-    eval_bird.py           # 主评测（--test / --exp ablation）
-    _precompute_gold.py    # Gold SQL 预计算缓存
-    _smoke_multidb.py      # 多数据库冒烟测试
     ingest_bird.py         # BIRD schema 向量化
+  deployment/              # docker-compose.yml (app + redis + pg + mysql + kafka)
+  tests/                   # 138 tests
   reports/.gold_cache/     # Gold SQL 预计算结果
   logs/traces/             # 流式 trace (jsonl)
   data/bird/mini_dev_data/ # BIRD Mini-Dev 数据集

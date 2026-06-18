@@ -10,6 +10,7 @@ from api.middleware import RequestLoggingMiddleware, RateLimitMiddleware
 from api.routes.health import router as health_router
 from api.routes.query import router as query_router
 from api.routes.eval import router as eval_router
+from api.routes.task import router as task_router
 
 _log = logging.getLogger("nl2sql.api")
 
@@ -66,6 +67,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router, prefix="/api/v1", tags=["Health"])
     app.include_router(query_router, prefix="/api/v1", tags=["Query"])
     app.include_router(eval_router, prefix="/api/v1", tags=["Eval"])
+    app.include_router(task_router, prefix="/api/v1", tags=["Task"])
 
     return app
 

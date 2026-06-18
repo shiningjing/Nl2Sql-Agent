@@ -138,3 +138,49 @@ class EvalTaskListItem(BaseModel):
     overall_passed: int
     created_at: str
     completed_at: str
+
+
+# ── Async task endpoints (W3) ────────────────────────────────────────────────
+
+class TaskSubmitRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=2000)
+    rag_schema: bool = True
+    rag_domain: bool = True
+    multi_candidate: bool = True
+    rag_k: int = Field(default=8, ge=1, le=50)
+    rag_column_prune: bool = False
+    rag_hybrid: bool = True
+    rag_fk_expand: bool = True
+    fewshot_enabled: bool = True
+    database_url: str | None = None
+    db_id: str | None = None
+    llm: LLMConfig | None = None
+    idempotency_key: str | None = Field(default=None, max_length=128,
+        description="Client-generated dedup key; same key within 5 min returns existing task_id")
+
+
+class TaskSubmitResponse(BaseModel):
+    task_id: str
+    status: str  # "PENDING"
+
+
+class TaskStatusResponse(BaseModel):
+    task_id: str
+    status: str  # PENDING | RUNNING | SUCCESS | FAILED | TIMEOUT | CANCELLED
+    question: str = ""
+    db_id: str = ""
+    progress: int = 0
+    node: str | None = None
+    sql: str | None = None
+    exec_result: dict | None = None
+    token_usage: dict = Field(default_factory=dict)
+    node_timings: dict = Field(default_factory=dict)
+    error: str | None = None
+    retry_count: int = 0
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class TaskCancelResponse(BaseModel):
+    task_id: str
+    status: str  # "cancelled" | "not_found"
