@@ -2,23 +2,7 @@
 from sqlalchemy import text
 from storage.config import Config
 from retrieval.schema import get_engine
-
-FORBIDDEN_KW = ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "PRAGMA", "ATTACH", "DETACH"]
-
-
-def _safety_check(sql: str) -> tuple[bool, str]:
-    """Pre-execution safety gate. Returns (safe, reason)."""
-    sql_upper = sql.upper()
-
-    for kw in FORBIDDEN_KW:
-        if kw in sql_upper:
-            return False, f"Forbidden keyword in SQL: {kw}"
-
-    statements = [s.strip() for s in sql.split(";") if s.strip()]
-    if len(statements) > 1:
-        return False, "Multiple statements detected"
-
-    return True, ""
+from guard.safety_rules import check_safety
 
 
 def execute_sql(sql: str, max_rows: int = 1000, database_url: str | None = None) -> dict:
@@ -34,8 +18,17 @@ def execute_sql(sql: str, max_rows: int = 1000, database_url: str | None = None)
             "row_count": int,
         }
     """
-    safe, reason = _safety_check(sql)
-    if not safe:
+    # Unified safety check (L1 regex + L3 AST)
+    dialect_map = {"postgresql": "postgres", "mysql": "mysql"}
+    dialect = "sqlite"
+    if database_url:
+        for prefix, d in dialect_map.items():
+            if database_url.startswith(prefix):
+                dialect = d
+                break
+    safety = check_safety(sql, dialect)
+    if not safety["valid"]:
+        reason = safety["issues"][0]["detail"] if safety["issues"] else "Unknown validation error"
         return {"success": False, "data": None, "columns": None, "error": reason, "row_count": 0}
 
     try:

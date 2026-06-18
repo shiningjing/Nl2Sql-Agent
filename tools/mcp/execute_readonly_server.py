@@ -7,7 +7,7 @@ Usage:
 Hard limits (enforced at tool layer):
 - Only SELECT/WITH allowed (regex + sqlglot AST dual validation)
 - Auto-wrap LIMIT if not present (default 200, hard cap 1000)
-- Connection-level statement timeout (30s default)
+- Connection-level statement timeout (60s default)
 - max_rows hard upper limit 1000 (reject above, don't silently truncate)
 - Execution result rows must not exceed max_rows
 
@@ -16,10 +16,8 @@ Output: {success, error, error_type, data, columns, row_count, execution_ms}
 """
 
 import os
-import re
 import sys
 import time
-import threading
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
 # Ensure project root on path for subprocess (MCP stdio) execution
@@ -28,8 +26,7 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 from fastmcp import FastMCP
-
-from tools.mcp.validate_sql_server import _l1_regex_check, _l3_ast_check
+from guard.safety_rules import check_safety
 
 mcp = FastMCP("execute-readonly-sql")
 
@@ -74,16 +71,12 @@ def _validate_input(sql: str, dialect: str, max_rows: int, timeout_ms: int) -> d
             "data": None, "columns": None, "row_count": 0, "execution_ms": 0,
         }
 
-    # L1 + L3 validation (reuse validate_sql logic)
-    issues: list[dict] = []
-    issues.extend(_l1_regex_check(sql))
-    ast_issues, _, _ = _l3_ast_check(sql, dialect)
-    issues.extend(ast_issues)
-    if issues:
-        types = [i["type"] for i in issues]
+    # Unified safety check (L1 regex + L3 AST via safety_rules)
+    safety = check_safety(sql, dialect)
+    if not safety["valid"]:
         return {
             "success": False,
-            "error": f"SQL validation failed: {issues[0]['detail']}",
+            "error": f"SQL validation failed: {safety['issues'][0]['detail']}",
             "error_type": "SQL_VALIDATION_FAILED",
             "data": None, "columns": None, "row_count": 0, "execution_ms": 0,
         }
@@ -176,7 +169,7 @@ def execute_readonly_sql(
         sql: The SQL query to execute (SELECT/WITH only).
         database_url: SQLAlchemy database URL (sqlite:///..., postgresql://..., mysql://...).
         max_rows: Maximum rows to return (default 200, hard cap 1000).
-        timeout_ms: Query timeout in milliseconds (default 30000, max 120000).
+        timeout_ms: Query timeout in milliseconds (default 60000, max 120000).
     """
     dialect = _dialect_from_url(database_url)
 

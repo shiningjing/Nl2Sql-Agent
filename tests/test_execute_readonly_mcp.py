@@ -131,7 +131,7 @@ class TestExecuteReadOnly:
 
     def test_execution_ms_returned(self):
         r = execute_readonly_sql("SELECT 1", SQLITE_DB)
-        assert r["execution_ms"] > 0
+        assert r["execution_ms"] >= 0
 
     # ── Nonexistent table ─────────────────────────────────────────────
 

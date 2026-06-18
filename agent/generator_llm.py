@@ -26,26 +26,6 @@ def extract_sql(response: str) -> str:
     return response.strip()
 
 
-def validate_sql(sql: str) -> tuple[bool, str]:
-    """Lightweight SQL validation. Returns (is_valid, reason)."""
-    sql_upper = sql.upper()
-
-    if "SELECT" not in sql_upper:
-        return False, "SQL does not contain SELECT"
-
-    forbidden = ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "PRAGMA"]
-    for kw in forbidden:
-        if kw in sql_upper:
-            return False, f"Forbidden keyword: {kw}"
-
-    # Strip to first statement if semicolons present
-    statements = [s.strip() for s in sql.split(";") if s.strip()]
-    if len(statements) > 1:
-        return False, "Multiple statements detected"
-
-    return True, ""
-
-
 def _extract_token_usage(response) -> dict:
     tu = response.response_metadata.get("token_usage", {}) if hasattr(response, "response_metadata") else {}
     return {
