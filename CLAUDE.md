@@ -1,4 +1,4 @@
-# CLAUDE.md — NL2SQL Agent v0.2.3 → DataAgentOps
+# CLAUDE.md — NL2SQL Agent v0.2.7 → DataAgentOps
 
 ## 项目概览
 
@@ -34,7 +34,7 @@ OpenTelemetry → Tracing / Metrics / Logs
 | 周次  | 主题               | 核心交付                                                      |
 | --- | ---------------- | --------------------------------------------------------- |
 | W1  | 重构 + AgentOps 基础 | 模块化拆分、统一 AgentState、OpenTelemetry 全链路 tracing、BIRD 自动评测脚本 |
-| W2  | MCP 工具 + SQL 安全    | 2 个 MCP 工具（validate_sql + execute_readonly_sql）、SQL 安全层（9 规则）、统一错误分类     |
+| W2  | MCP 工具 + SQL 安全    | ✅ 2 个 MCP 工具（validate_sql + execute_readonly_sql）、SQL 安全层（9 规则）、统一错误分类、Voter 按需激活     |
 | W3  | 异步任务 + SSE       | Kafka (4 Topic) + Redis 任务状态机、SSE 流式接口、重试/幂等/超时/取消        |
 | W4  | 部署 + 压测 + 文档     | Docker Compose 一键启动、K8s 部署、三类压测（功能/性能/稳定性）、简历材料           |
 
@@ -44,7 +44,7 @@ OpenTelemetry → Tracing / Metrics / Logs
 - **P1**：K8s、Dead-letter queue、任务取消、prompt 版本管理、失败回放、Grafana
 - **P2**：Go 工具网关、gRPC、多租户、自动扩缩容、混合检索、成本治理
 
-## W2 执行计划：MCP 工具 + SQL 安全层 + 统一错误分类 + Voter 优化
+## W2 执行计划：MCP 工具 + SQL 安全层 + 统一错误分类 + Voter 优化 ✅ 完成 (v0.2.3–v0.2.7)
 
 **目标**：交付 2 个可独立调用的 MCP 工具，补齐 SQL 安全层，规范错误分类，优化 Voter 策略。
 
@@ -309,12 +309,12 @@ nl2sql-mini-agent/
 
 ```bash
 # 评测（测试/完整消融/预计算 gold）
-python scripts/eval_bird.py --test --samples 20 --configs R2,R5
-python scripts/eval_bird.py --exp ablation --max-workers 8
-python scripts/_precompute_gold.py
+python -m evaluation.run --test --samples 20 --configs R2,R5
+python -m evaluation.run --exp ablation --max-workers 8
+python -m evaluation.precompute_gold
 
 # 冒烟测试（需先 docker compose up -d mysql postgres）
-python scripts/_smoke_multidb.py
+python tests/smoke_multidb.py
 
 # BIRD schema 向量化
 python scripts/ingest_bird.py
@@ -325,7 +325,7 @@ python scripts/ingest_bird.py
 1. **Self-Correction 修复率 7-20%** — Refiner 需重新设计
 2. **SemCheck FN 率 50-65%** — 缺 gold 参照，方向：引入参照对比 + 硬规则层
 3. **Guard FN 率 49-68%** — 纯形式校验无语义能力，方向：关键词→语法要求映射
-4. **Generator 时间占比 50%+** — 多候选时翻倍
+4. ~~Generator 时间占比 50%+ — 多候选时翻倍~~ → W2 已修复：正常路径单条 temp=0，仅 Self-Correction 走多候选
 
 ## Redis 连接策略
 
