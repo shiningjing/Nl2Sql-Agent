@@ -4,9 +4,9 @@
 
 自然语言 → SQL 端到端系统。LangGraph 状态机编排（Router → Schema Retriever → Decomposer → Generator → Guard → Voter → SemCheck → Refiner）。BIRD Mini-Dev（500 题，11 DB，3 方言）消融评测。
 
-**BIRD 结果**：DeepSeek V4 Pro（日常）EX **38.8%** / Claude Opus 4.7 EX **47.0%**。RAG Table Recall 95.9%。
+**BIRD 结果**：DeepSeek V4 Pro EX **39.0%**（100 题 / RAG）/ **43.0%**（+Evidence）/ Claude Opus 4.7 EX **47.0%**。RAG Table Recall **98.4%**（100 题）。200 次调用 0 crash。
 
-**核心发现**：RAG 最大杠杆 (+11pp)；Decomposer 对 DeepSeek 无效；换强模型 +8pp；Self-Correction 修复率 7-20% 仍是瓶颈。
+**核心发现**：RAG 最大杠杆 (+11pp)；Decomposer 对 DeepSeek 无效；换强模型 +8pp；Self-Correction 修复率 24-27%（较之前 7-20% 提升）。
 
 ## DataAgentOps 升级计划（2026-06 启动，4 周）
 
@@ -35,7 +35,7 @@ OpenTelemetry → Tracing / Metrics / Logs
 | --- | ---------------- | --------------------------------------------------------- |
 | W1  | 重构 + AgentOps 基础 | 模块化拆分、统一 AgentState、OpenTelemetry 全链路 tracing、BIRD 自动评测脚本 |
 | W2  | MCP 工具 + SQL 安全    | ✅ 2 个 MCP 工具（validate_sql + execute_readonly_sql）、SQL 安全层（9 规则）、统一错误分类、Voter 按需激活     |
-| W3  | 异步任务 + SSE       | 🏗 Kafka 消息队列 + Worker 独立进程 (T1 ✅)、Redis 任务状态机、SSE 流式、重试/幂等/超时/取消  |
+| W3  | 异步任务 + SSE + Human-Feedback | ✅ Kafka 异步 (T1)、Redis 心跳/TTL (T2)、SSE 流式 token (T3)、重试/取消 (T4)、Human-Feedback 多轮对话 |
 | W4  | 部署 + 压测 + 文档     | Docker Compose 一键启动、K8s 部署、三类压测（功能/性能/稳定性）、简历材料           |
 
 ### 优先级
@@ -237,17 +237,17 @@ Self-Correction 路径（retry_count > 0）:
 - **API 网关**：Go `go-chi`/`grpc-gateway` 做限流、鉴权、协议转换
 - **Schema 缓存服务**：Go 常驻内存缓存 + gRPC，替代 Python `lru_cache`
 
-## W3 执行计划：异步任务 + SSE 🏗 进行中
+## W3 执行计划：异步任务 + SSE + Human-Feedback ✅ 完成 (v0.3.0–v0.3.7)
 
 ### 任务 1：Kafka 消息队列集成 ✅ (v0.3.0)
 
-引入 Kafka 解耦 FastAPI 和 LangGraph 执行，支持异步任务提交。Worker 独立进程消费消息并跑 Graph，FastaPI 写入消息后立即返回 task_id（10ms）。
+引入 Kafka 解耦 FastAPI 和 LangGraph 执行，支持异步任务提交。Worker 独立进程消费消息并跑 Graph，FastAPI 写入消息后立即返回 task_id。
 
 **新增文件**：
 - `infrastructure/broker.py` — `MessageBroker` 抽象 + `KafkaBroker`（kafka-python，KRaft 无 ZK）
 - `infrastructure/task_store.py` — Redis 任务状态机（PENDING→RUNNING→SUCCESS/FAILED/TIMEOUT/CANCELLED）
 - `worker/main.py` — Worker 独立进程（`python -m worker.main`）
-- `api/routes/task.py` — 4 个异步端点（submit / status / cancel / stream）
+- `api/routes/task.py` — 5 个端点（submit / status / cancel / stream / feedback）
 
 **端点**：
 | 端点 | 方法 | 作用 |
@@ -255,27 +255,71 @@ Self-Correction 路径（retry_count > 0）:
 | `/task/submit` | POST | 提交任务 → Kafka → 返回 task_id（202） |
 | `/task/{id}/status` | GET | 从 Redis 读取任务状态 |
 | `/task/{id}/cancel` | POST | 请求取消，Worker 在节点间检查 |
-| `/task/{id}/stream` | GET | SSE 流式推送进度 |
+| `/task/{id}/stream` | GET | SSE 流式推送进度 + SQL token |
+| `/task/{id}/feedback` | POST | 人工反馈修正，最多 10 轮 |
 
-**8 个 Topic**：
+**5 个 Topic**：
 | Topic | 生产者 | 消费者 | 作用 |
 |-------|--------|--------|------|
 | `nl2sql.task.request` | FastAPI | Worker | 任务提交 |
 | `nl2sql.task.status` | Worker | SSE/轮询 | 节点进度 |
 | `nl2sql.task.result` | Worker | SSE/轮询 | 最终结果 |
+| `nl2sql.task.feedback` | FastAPI | Worker | 人工修正指导 |
 | `nl2sql.task.dlq` | Worker | 人工 | 死信（重试耗尽） |
 
-**状态机**：PENDING → RUNNING → SUCCESS / FAILED / TIMEOUT / CANCELLED
+**状态机**：PENDING → RUNNING → SUCCESS / FAILED / TIMEOUT / CANCELLED；feedback_transition() 允许 SUCCESS/FAILED → RUNNING
 
-**优雅降级**：Kafka 不可用时 publish → False（no-op），Worker 启动失败时系统回退到同步 `/query` 端点。
+### 任务 2：Redis 任务状态机增强 ✅ (v0.3.1)
 
-### 任务 2-4（待实现）
+- `task_heartbeat()` / `task_get_heartbeat()` — 心跳保活
+- `scan_stale_tasks()` — 基于 HEARTBEAT_STALE_S 扫描僵尸任务
+- Worker `_heartbeat_loop()` — 独立线程持续心跳，即使 Graph/SQL 阻塞
 
-- T2: Redis 任务状态机增强（心跳、TTL 清理）
-- T3: SSE 流式 SQL token 推送（复用 Generator token_callback）
-- T4: 重试/幂等/超时/取消 完善（DLQ 重放、协作式取消）
+### 任务 3：SSE 流式 SQL token 推送 ✅ (v0.3.2)
 
-### 任务 5：集成测试 + BIRD 冒烟（待实现）
+- `task_publish_token()` — Redis Pub/Sub 推送每个 SQL token
+- `event_generator()` / `_listen()` — SSE 端点监听 Redis Pub/Sub + Kafka status
+- `set_token_callback()` — Generator 注入回调，每生成一个 token 即推送
+
+### 任务 4：重试/超时/取消 完善 ✅ (v0.3.3)
+
+- Worker 取消检查：`task_is_cancelled()` 在节点间检查
+- 协作式取消：被取消任务跳过收尾节点直接 CANCELLED
+- 超时按 retry_count 递增（30s/45s/60s）
+- DLQ 创建但不自动重放（用户决定：人工排查后手动重试）
+
+### 任务 5：Human-Feedback 多轮对话 ✅ (v0.3.4–v0.3.7)
+
+用户可在 Agent 返回结果后提供自然语言修正指导，Agent 从 Refiner 开始修正 SQL。最多 10 轮，完整对话记忆持久化 Redis。
+
+**新增/修改文件**：
+- `agent/state.py` — 新增 `user_feedback`、`conversation_turns`、`is_feedback_round` 字段
+- `agent/graphs/feedback_graph.py` — 轻量修正图（Refiner→Generator→Guard→Voter→SemCheck）
+- `agent/nodes/refiner.py` — `_format_user_feedback()` 格式化多轮对话历史
+- `infrastructure/task_store.py` — `feedback_transition()` + 上下文持久化
+- `api/routes/task.py` — `POST /task/{id}/feedback` 端点
+- `worker/main.py` — `handle_feedback()` + `run_feedback_graph()`
+- `ui/app.py` — 多轮对话 UI（折叠历史轮次 + feedback 输入框）
+- `tests/test_feedback.py` — 16 个测试
+
+### 任务 6：集成测试 + BIRD 冒烟 ✅ (v0.3.7)
+
+- **全量测试**：188 passed（5 个 rate limit 429 已修复：`_RATE_LIMIT_MAX` 10→100）
+- **集成测试**：66 passed（state machine、heartbeat、stale scan、timeout、TTL、token streaming、feedback graph）
+- **BIRD 100 题随机 benchmark**（deepseek-v4-pro，R2_RAG + R5_Evidence）：
+
+| 指标 | R2_RAG | R5_Evidence |
+|------|--------|-------------|
+| EX | **39.0%** | **43.0%** |
+| VES | 0.49 | 0.43 |
+| Crashed | 0/100 | 0/100 |
+| Avg Time | 11.6s | 10.9s |
+| Avg Tokens | 16,762 | 15,358 |
+| RAG Recall | 98.4% | 97.9% |
+| Self-Correction Fix | 26.5% | 24.1% |
+| Cost | | $0.97 (¥7) |
+
+- **结论**：R2_RAG EX 39.0% 持平基线 38.8%，0 crash，管道稳定，无回归
 
 ## 技术栈
 
@@ -360,11 +404,11 @@ python tests/smoke_multidb.py
 python scripts/ingest_bird.py
 ```
 
-## 已知瓶颈
+## 已知瓶颈 (2026-06-21 100 题 benchmark 更新)
 
-1. **Self-Correction 修复率 7-20%** — Refiner 需重新设计
-2. **SemCheck FN 率 50-65%** — 缺 gold 参照，方向：引入参照对比 + 硬规则层
-3. **Guard FN 率 49-68%** — 纯形式校验无语义能力，方向：关键词→语法要求映射
+1. **Self-Correction 修复率 24-27%** — 较之前 7-20% 提升，但仍有 70%+ 重试无法修复
+2. **SemCheck FN 率 34-39%** — 较之前 50-65% 明显改善，但 1/3 的 YES→EX=0 仍需解决
+3. **Guard FN 率 55-56%** — 纯形式校验无语义能力，方向：关键词→语法要求映射
 4. ~~Generator 时间占比 50%+ — 多候选时翻倍~~ → W2 已修复：正常路径单条 temp=0，仅 Self-Correction 走多候选
 
 ## Redis 连接策略
