@@ -2,20 +2,25 @@ version: "3.9"
 
 services:
   app:
-    build: .
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
     ports:
-      - "8501:8501"
+      - "8000:8000"   # FastAPI
+      - "8501:8501"   # Streamlit
     environment:
       - LLM_BASE_URL=${LLM_BASE_URL:-https://api.deepseek.com/v1}
       - LLM_API_KEY=${LLM_API_KEY:-}
       - LLM_CHAT_MODEL=${LLM_CHAT_MODEL:-deepseek-v4-pro}
       - EMBED_MODEL_NAME=${EMBED_MODEL_NAME:-BAAI/bge-small-zh-v1.5}
       - REDIS_URL=redis://redis:6379/0
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
     volumes:
       - chroma_data:/app/.chroma
       - hf_cache:/root/.cache/huggingface
-      - ./data/bird:/app/data/bird:ro
-      - ./databases.json:/app/databases.json:ro
+      - ../data/bird:/app/data/bird:ro
+      - ../llm_keys.json:/app/llm_keys.json:ro
+      - ../databases.json:/app/databases.json:ro
     restart: unless-stopped
     depends_on:
       redis:
@@ -23,6 +28,8 @@ services:
       postgres:
         condition: service_healthy
       mysql:
+        condition: service_healthy
+      kafka:
         condition: service_healthy
 
   redis:
@@ -48,7 +55,7 @@ services:
       - "5432:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
-      - ./data/seed_pg.sql:/docker-entrypoint-initdb.d/01_seed.sql:ro
+      - ../data/seed_pg.sql:/docker-entrypoint-initdb.d/01_seed.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U nl2sql -d demo"]
       interval: 5s
@@ -67,7 +74,7 @@ services:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./data/seed_mysql.sql:/docker-entrypoint-initdb.d/01_seed.sql:ro
+      - ../data/seed_mysql.sql:/docker-entrypoint-initdb.d/01_seed.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "nl2sql", "-pnl2sql"]
       interval: 5s

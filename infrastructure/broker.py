@@ -5,10 +5,12 @@ Topic topology:
   nl2sql.task.status   – Worker → SSE/API (progress events)
   nl2sql.task.result   – Worker → SSE/API (final result)
   nl2sql.task.dlq      – Worker → manual (dead-letter, retries exhausted)
+  nl2sql.task.feedback – FastAPI → Worker (human correction guidance)
 """
 
 import json
 import logging
+import os
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -21,12 +23,13 @@ TOPIC_REQUEST = "nl2sql.task.request"
 TOPIC_STATUS = "nl2sql.task.status"
 TOPIC_RESULT = "nl2sql.task.result"
 TOPIC_DLQ = "nl2sql.task.dlq"
+TOPIC_FEEDBACK = "nl2sql.task.feedback"
 
-ALL_TOPICS = [TOPIC_REQUEST, TOPIC_STATUS, TOPIC_RESULT, TOPIC_DLQ]
+ALL_TOPICS = [TOPIC_REQUEST, TOPIC_STATUS, TOPIC_RESULT, TOPIC_DLQ, TOPIC_FEEDBACK]
 
 # ── Connection config ─────────────────────────────────────────────────────────
 
-KAFKA_BOOTSTRAP = "127.0.0.1:9092"
+KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "127.0.0.1:9092")
 KAFKA_DEFAULT_TIMEOUT_MS = 5000
 
 

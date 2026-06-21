@@ -342,7 +342,7 @@ Self-Correction 路径（retry_count > 0）:
 
 ### 任务 1：Docker Compose 一键启动
 
-**目标**：`docker compose up -d` 启动全部服务，浏览器打开能直接用。
+**目标**：`docker compose -f deployment/docker-compose.yml up -d` 启动全部服务。
 
 **现状问题**：
 - Dockerfile 只跑 Streamlit（`CMD streamlit run app.py`），缺少 API 和 Worker
@@ -353,7 +353,7 @@ Self-Correction 路径（retry_count > 0）:
 - 1.1 重写 Dockerfile — supervisord 或 shell 脚本启动 3 进程（API :8000 + Worker + Streamlit :8501）
 - 1.2 补全 docker-compose — 暴露端口 8000/8501/8080，挂载 `llm_keys.json`、BIRD 数据、databases.json
 - 1.3 `.env.example` 模板
-- 1.4 验证：`docker compose up -d` → `curl localhost:8000/docs` 可访问
+- 1.4 验证：`docker compose -f deployment/docker-compose.yml up -d` → `curl localhost:8000/docs`
 
 ### 任务 2：Go MCP Server（P1 → W4）
 
@@ -481,7 +481,7 @@ nl2sql-mini-agent/
   corpus/bird_fewshot/     # Few-shot 示例（按 db_id + 方言）
   scripts/
     ingest_bird.py         # BIRD schema 向量化
-  deployment/              # docker-compose.yml (app + redis + pg + mysql + kafka)
+  deployment/              # Dockerfile + docker-compose.yml (app + redis + pg + mysql + kafka)
   tests/                   # 188 tests
   reports/.gold_cache/     # Gold SQL 预计算结果
   logs/traces/             # 流式 trace (jsonl)
@@ -511,7 +511,7 @@ python -m evaluation.run --test --samples 20 --configs R2,R5
 python -m evaluation.run --exp ablation --max-workers 8
 python -m evaluation.precompute_gold
 
-# 冒烟测试（需先 docker compose up -d mysql postgres）
+# 冒烟测试（需先 docker compose -f deployment/docker-compose.yml up -d mysql postgres）
 python tests/smoke_multidb.py
 
 # BIRD schema 向量化

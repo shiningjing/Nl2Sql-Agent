@@ -1,0 +1,38 @@
+# Environment
+.env
+.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# ChromaDB
+.chroma/
+
+# IDE
+.vscode/
+.idea/
+
+# Reports & logs
+reports/
+logs/
+
+# Tests
+tests/
+
+# Git
+.git/
+.gitignore
+
+# Docs
+docs/
+*.md
+
+# Claude
+.claude/
+
+# Misc
+*.codegraph/

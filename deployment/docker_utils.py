@@ -17,14 +17,14 @@ def _get_project_root() -> str:
         os.getcwd(),
     ]
     for c in candidates:
-        if os.path.exists(os.path.join(c, "docker-compose.yml")):
+        if os.path.exists(os.path.join(c, "deployment", "docker-compose.yml")):
             _PROJECT_ROOT = c
             return c
     return candidates[0]
 
 
 def _compose_file() -> str:
-    return os.path.join(_get_project_root(), "docker-compose.yml")
+    return os.path.join(_get_project_root(), "deployment", "docker-compose.yml")
 
 
 def start_dbs() -> bool:

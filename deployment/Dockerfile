@@ -1,4 +1,4 @@
-FROM python:3.10-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
@@ -17,13 +17,16 @@ RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTr
 # Copy project (excluding items in .dockerignore)
 COPY . .
 
-# ChromaDB persistent storage + HF cache
+# ── Copy deployment files ──
+COPY deployment/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Persistent volumes
 VOLUME ["/app/.chroma"]
 VOLUME ["/root/.cache/huggingface"]
 
-EXPOSE 8501
+EXPOSE 8000 8501
 
-ENV STREAMLIT_SERVER_PORT=8501
-ENV STREAMLIT_SERVER_ADDRESS=0.0.0.0
+ENV PYTHONUNBUFFERED=1
 
-CMD ["streamlit", "run", "app.py"]
+ENTRYPOINT ["/entrypoint.sh"]
