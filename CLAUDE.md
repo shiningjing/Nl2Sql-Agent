@@ -36,13 +36,13 @@ OpenTelemetry → Tracing / Metrics / Logs
 | W1  | 重构 + AgentOps 基础 | 模块化拆分、统一 AgentState、OpenTelemetry 全链路 tracing、BIRD 自动评测脚本 |
 | W2  | MCP 工具 + SQL 安全    | ✅ 2 个 MCP 工具（validate_sql + execute_readonly_sql）、SQL 安全层（9 规则）、统一错误分类、Voter 按需激活     |
 | W3  | 异步任务 + SSE + Human-Feedback | ✅ Kafka 异步 (T1)、Redis 心跳/TTL (T2)、SSE 流式 token (T3)、重试/取消 (T4)、Human-Feedback 多轮对话 |
-| W4  | 部署 + 压测 + 文档     | Docker Compose 一键启动、K8s 部署、三类压测（功能/性能/稳定性）、简历材料           |
+| W4  | 部署 + Go 工具 + UI + 压测 + 文档 | Docker Compose、Go MCP Server、Streamlit ChatGPT 风格 UI、Go API 网关、三类压测、简历 |
 
 ### 优先级
 
-- **P0**：模块化重构、自动评测、OTel tracing、MCP 工具层、SQL 安全、Kafka 异步、Redis 状态、SSE、Docker Compose、README
-- **P1**：K8s、Dead-letter queue、任务取消、prompt 版本管理、失败回放、Grafana
-- **P2**：Go 工具网关、gRPC、多租户、自动扩缩容、混合检索、成本治理
+- **P0**：模块化重构、自动评测、OTel tracing、MCP 工具层、SQL 安全、Kafka 异步、Redis 状态、SSE、Docker Compose、Go MCP Server、Go API 网关、README
+- **P1**：Dead-letter queue、prompt 版本管理、失败回放、Grafana
+- **P2**：gRPC、多租户、自动扩缩容、混合检索、成本治理
 
 ## W2 执行计划：MCP 工具 + SQL 安全层 + 统一错误分类 + Voter 优化 ✅ 完成 (v0.2.3–v0.2.7)
 
@@ -336,8 +336,120 @@ Self-Correction 路径（retry_count > 0）:
 | 消息        | —                                    | + Kafka                     |
 | 可观测       | TraceLogger (jsonl)                  | + OpenTelemetry             |
 | 工具        | —                                    | + MCP 协议                    |
-| 部署        | Docker Compose                       | + K8s                       |
-| 网关        | —                                    | + Go (P1)                   |
+| 部署        | Docker Compose                       | + Go API 网关 (go-chi)        |
+
+## W4 执行计划：部署 + Go 工具 + 压测 + 文档
+
+### 任务 1：Docker Compose 一键启动
+
+**目标**：`docker compose up -d` 启动全部服务，浏览器打开能直接用。
+
+**现状问题**：
+- Dockerfile 只跑 Streamlit（`CMD streamlit run app.py`），缺少 API 和 Worker
+- docker-compose.yml app 服务没有暴露 API 8000 端口
+- 缺少 `.env.example`
+
+**子任务**：
+- 1.1 重写 Dockerfile — supervisord 或 shell 脚本启动 3 进程（API :8000 + Worker + Streamlit :8501）
+- 1.2 补全 docker-compose — 暴露端口 8000/8501/8080，挂载 `llm_keys.json`、BIRD 数据、databases.json
+- 1.3 `.env.example` 模板
+- 1.4 验证：`docker compose up -d` → `curl localhost:8000/docs` 可访问
+
+### 任务 2：Go MCP Server（P1 → W4）
+
+**目标**：用 Go 重写 validate_sql 和 execute_readonly_sql，替换 Python MCP 工具。Python MCP Client 无需改动。
+
+**技术栈**：
+- `mark3labs/mcp-go` — MCP Server SDK
+- `vitess/sqlparser` — SQL AST 解析（替代 sqlglot）
+- `database/sql` — 数据库连接池
+
+**子任务**：
+- 2.1 初始化 `mcp-server/` Go module
+- 2.2 `validate_sql` 工具 — AST 校验（语法/多语句/禁止类型），输出 `{valid, issues[], table_references}`
+- 2.3 `execute_readonly_sql` 工具 — 只读 SQL 执行（双重校验 + LIMIT 自动包装 + 超时 + 行数上限）
+- 2.4 安全硬限制：正则 + vitess AST 双重校验、连接级超时、max_rows 硬上限 1000
+- 2.5 测试：合法 SELECT / 多语句拒绝 / DROP 拒绝 / 语法错误 / LIMIT 包装
+- 2.6 Docker Compose 中加入 mcp-server 服务
+
+### 任务 3：Streamlit UI 优化 — ChatGPT 风格对话
+
+**目标**：改成 ChatGPT/Claude 风格的对话 UI，每轮独立气泡，中间过程可收起。
+
+**具体改动**：
+
+| # | 需求 | 说明 |
+|---|------|------|
+| 1 | 每轮独立气泡 | 所有用户发言和 Agent 回复都用独立 `st.chat_message` 渲染，交替排列，像 ChatGPT 那样 |
+| 2 | 中间过程可收起 | 每个 Agent 回复顶部显示 Pipeline 节点耗时，默认折叠在 `st.expander` 里 |
+| 3 | [＋新对话] 按钮 | 页面左上角，点击清空当前对话、开始新会话 |
+| 4 | 标题缩小 | "NL2SQL Agent — BIRD" 改成小字副标题 |
+| 5 | 单个输入框 | 自动判断：有活跃对话且最后结果成功 → 反馈模式；否则 → 新问题模式 |
+| 6 | 删除对话 | 侧边栏每条历史右侧 🗑 按钮，删除单条 |
+| 7 | 导出记录 | 侧边栏 Export 按钮，下载 JSON（全部历史）或 Markdown（当前对话） |
+
+**对话结构**：
+
+```
+┌─ [＋新对话] ── NL2SQL Agent ──────────────────────────┐
+│                                                        │
+│  ┌─ User ────────────────────────────────────────┐     │
+│  │ 查询每个客户的订单数                            │     │
+│  └──────────────────────────────────────────────┘     │
+│  ┌─ Assistant ───────────────────────────────────┐     │
+│  │ ▸ Pipeline: Router 0.4s → Generator 5.2s → ..│     │
+│  │   (点击展开中间过程详情)                        │     │
+│  │                                               │     │
+│  │ SQL: SELECT COUNT(*) ...                      │     │
+│  │ Results: 1 row [table]                        │     │
+│  └──────────────────────────────────────────────┘     │
+│  ┌─ User ────────────────────────────────────────┐     │
+│  │ 不要count，列出学校名字和数学成绩               │     │
+│  └──────────────────────────────────────────────┘     │
+│  ┌─ Assistant ───────────────────────────────────┐     │
+│  │ ▸ Pipeline: Refiner → Generator 3.1s → ...    │     │
+│  │ SQL: SELECT s.School, sc.AvgScrMath ...       │     │
+│  │ Results: 12 rows [table]                      │     │
+│  └──────────────────────────────────────────────┘     │
+│  ┌──────────────────────────────────────────────┐     │
+│  │ Ask a question or provide feedback...         │     │
+│  └──────────────────────────────────────────────┘     │
+│                                                        │
+│  [侧边栏] Database / Samples / History / Export       │
+└──────────────────────────────────────────────────────┘
+```
+
+### 任务 4：Go API 网关（P1 → W4）
+
+**目标**：用 Go 写轻量 API 网关，统一入口，提供限流/健康检查/请求日志。
+
+**技术栈**：
+- `go-chi/chi` — HTTP 路由
+- `httputil.ReverseProxy` — 反向代理到 Python FastaPI
+
+**子任务**：
+- 4.1 初始化 `gateway/` Go module
+- 4.2 反向代理 — 所有请求转发到 FastaPI :8000
+- 4.3 限流中间件 — 内存滑动窗口（100 req/min/IP），Redis 降级
+- 4.4 聚合健康检查 — `GET /health` 返回 `{api, worker, redis, kafka, mcp}`
+- 4.5 结构化请求日志 — method/path/status/elapsed/client_ip
+- 4.6 Docker Compose 中加入 gateway 服务（对外暴露 8080）
+
+### 任务 5：三类压测
+
+**目标**：在 Docker 环境下验证功能/性能/稳定性。
+
+**子任务**：
+- 5.1 功能压测 — Docker 环境下 BIRD 20 题冒烟，确认 EX 无退化
+- 5.2 性能压测 — 并发提交脚本（10/50/100 并发），测 P50/P95/P99 延迟、吞吐量
+- 5.3 稳定性压测 — 长时间运行（30 分钟持续请求），检查内存/CPU 无泄漏，Kafka/Redis 无堆积
+- 5.4 输出压测报告 `reports/stress_test.md`
+
+### 任务 6：文档 + 简历材料
+
+**子任务**：
+- 6.1 README.md 重写 — 架构图（ASCII art）、快速开始（Docker Compose 三步）、API 概览、评测结果
+- 6.2 简历项目描述 — 技术栈、成果数据（EX 39%、RAG 98.4%、200 次 0 crash）、Go MCP/网关亮点
 
 ## 关键约束
 
@@ -370,12 +482,14 @@ nl2sql-mini-agent/
   scripts/
     ingest_bird.py         # BIRD schema 向量化
   deployment/              # docker-compose.yml (app + redis + pg + mysql + kafka)
-  tests/                   # 138 tests
+  tests/                   # 188 tests
   reports/.gold_cache/     # Gold SQL 预计算结果
   logs/traces/             # 流式 trace (jsonl)
   data/bird/mini_dev_data/ # BIRD Mini-Dev 数据集
   llm_keys.json            # LLM 密钥（不提交 Git）
   databases.json           # 用户自定义数据库连接
+  mcp-server/              # Go MCP Server (validate_sql + execute_readonly_sql)
+  gateway/                 # Go API Gateway (go-chi 限流/反向代理)
 ```
 
 ## LLM 预设 (8 个)
