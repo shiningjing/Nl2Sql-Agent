@@ -106,7 +106,7 @@ def voter_node(state: AgentState) -> dict:
 
     # ── No database → LLM vote ──
     if not database_url:
-        winner = _llm_vote(question, schema_text, sqls, tlog)
+        winner = _llm_vote(question, schema_text, sqls, tlog=tlog)
         node_latency = dict(state.get("node_latency", {}))
         node_latency["voter"] = round(time.time() - t0, 3)
         return {
@@ -159,7 +159,7 @@ def voter_node(state: AgentState) -> dict:
         reason = "timeout" if any("timed out" in r["result"].get("error", "") for r in results) else "exec_fail"
         if tlog:
             tlog.node_exit("voter", {"winner": "llm_fallback", "reason": reason})
-        winner = _llm_vote(question, schema_text, sqls, tlog)
+        winner = _llm_vote(question, schema_text, sqls, tlog=tlog)
         node_latency = dict(state.get("node_latency", {}))
         node_latency["voter"] = round(time.time() - t0, 3)
         return {

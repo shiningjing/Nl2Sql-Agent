@@ -55,6 +55,22 @@ docker-compose.override.yml
 .ipynb_checkpoints/
 *.ipynb
 
+# ── Reports data ──
+reports/*.csv
+
+# ── SQLite WAL/Shm ──
+*.db-shm
+*.db-wal
+
+# ── Screenshots ──
+*.png
+
+# ── Playwright MCP ──
+.playwright-mcp/
+
+# ── Office docs ──
+*.docx
+
 # ── Claude ──
 .claude/
 .codegraph/
