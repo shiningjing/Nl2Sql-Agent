@@ -46,7 +46,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="NL2SQL Agent API",
         description="Natural Language → SQL with RAG, Multi-Candidate Generation, and Self-Correction",
-        version="0.2.0",
+        version="0.4.6",
         lifespan=lifespan,
     )
 
