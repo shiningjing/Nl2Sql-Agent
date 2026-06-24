@@ -38,15 +38,68 @@ Natural language → SQL end-to-end system. LangGraph state machine orchestrates
 ### LangGraph Agent
 
 ```
-  Router → Schema Retriever → Decomposer
-     → Generator → Guard → Voter → SemCheck
-     → Refiner (self-correction loop)
-
-  Human Feedback Graph:
-     Refiner → Generator → Guard → Voter → SemCheck
+                         ┌─────────────────────┐
+                         │       Router        │
+                         │   simple / complex  │
+                         └──────────┬──────────┘
+                                    │
+                         ┌──────────▼──────────┐
+                         │   Schema Retriever  │
+                         │   RAG + DDL build   │
+                         └──────────┬──────────┘
+                                    │
+                         complex ───┴─── simple
+                           │                │
+                ┌──────────▼──────────┐     │
+                │     Decomposer      │     │
+                │   sub-question DAG  │     │
+                └──────────┬──────────┘     │
+                           │                │
+                           └──────┬─────────┘
+                                  │
+                       ┌──────────▼──────────┐
+                       │   Few-shot Selector │
+                       │   Top-K example     │
+                       └──────────┬──────────┘
+                                  │
+                       ┌──────────▼──────────┐
+                       │      Generator      │
+                       │  single (temp=0)    │
+                       │  multi on retry     │
+                       └──────────┬──────────┘
+                                  │
+                       ┌──────────▼──────────┐
+                       │        Guard        │
+                       │  AST + 9 rules      │
+                       └──────────┬──────────┘
+                                  │
+                        pass ─────┴───── fail
+                          │                │
+               ┌──────────▼──────────┐  ┌──▼──────────┐
+               │        Voter        │  │   Refiner   │
+               │  parallel exec +    │◄─│  error →    │
+               │  LLM tiebreak       │  │  Generator  │
+               └──────────┬──────────┘  └──▲──────────┘
+                          │                │
+                  winner ─┴── no winner ───┘
+                          │
+               ┌──────────▼──────────┐
+               │   Semantic Check    │
+               │   LLM YES / NO      │
+               └──────────┬──────────┘
+                          │
+                   YES ───┴─── NO ───→ Refiner
+                          │
+                    ┌─────▼─────┐
+                    │    END    │
+                    └───────────┘
+                          ▲
+                          │
+              Human Feedback (POST /task/{id}/feedback)
 
   Tools: MCP validate_sql · execute_readonly_sql
          Python (fastmcp) + Go (mcp-go)
+```
 
 ## Quick Start
 

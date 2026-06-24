@@ -38,15 +38,68 @@
 ### LangGraph Agent
 
 ```
-  Router → Schema Retriever → Decomposer
-     → Generator → Guard → Voter → SemCheck
-     → Refiner（自修复循环）
-
-  Human Feedback Graph（人工修正）:
-     Refiner → Generator → Guard → Voter → SemCheck
+                         ┌─────────────────────┐
+                         │       Router        │
+                         │   简单 / 复杂 判定   │
+                         └──────────┬──────────┘
+                                    │
+                         ┌──────────▼──────────┐
+                         │   Schema Retriever  │
+                         │   RAG + DDL 构建    │
+                         └──────────┬──────────┘
+                                    │
+                         复杂 ──────┴────── 简单
+                           │                │
+                ┌──────────▼──────────┐     │
+                │     Decomposer      │     │
+                │   子问题 DAG 拆解    │     │
+                └──────────┬──────────┘     │
+                           │                │
+                           └──────┬─────────┘
+                                  │
+                       ┌──────────▼──────────┐
+                       │   Few-shot Selector │
+                       │   Top-K 示例检索     │
+                       └──────────┬──────────┘
+                                  │
+                       ┌──────────▼──────────┐
+                       │      Generator      │
+                       │  单候选 (temp=0)     │
+                       │  重试时多候选        │
+                       └──────────┬──────────┘
+                                  │
+                       ┌──────────▼──────────┐
+                       │        Guard        │
+                       │   AST + 9 规则      │
+                       └──────────┬──────────┘
+                                  │
+                        通过 ─────┴───── 拒绝
+                          │                │
+               ┌──────────▼──────────┐  ┌──▼──────────┐
+               │        Voter        │  │   Refiner   │
+               │  并行执行 +          │◄─│  错误 →     │
+               │  LLM 平票兜底       │  │  Generator  │
+               └──────────┬──────────┘  └──▲──────────┘
+                          │                │
+                 有优胜 ───┴── 无优胜 ─────┘
+                          │
+               ┌──────────▼──────────┐
+               │   Semantic Check    │
+               │   LLM YES / NO      │
+               └──────────┬──────────┘
+                          │
+                  通过 ───┴─── 不通过 ──→ Refiner
+                          │
+                    ┌─────▼─────┐
+                    │    END    │
+                    └───────────┘
+                          ▲
+                          │
+              人工反馈 (POST /task/{id}/feedback)
 
   工具: MCP validate_sql · execute_readonly_sql
         Python (fastmcp) + Go (mcp-go)
+```
 
 ## 快速开始
 
