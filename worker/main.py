@@ -15,18 +15,19 @@ import sys
 import threading
 import time
 import traceback
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
 # Ensure project root is on path (for python -m worker.main)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from infrastructure.broker import (
-    TOPIC_REQUEST, TOPIC_STATUS, TOPIC_RESULT, TOPIC_DLQ,
+    TOPIC_REQUEST, TOPIC_STATUS, TOPIC_RESULT, TOPIC_DLQ, TOPIC_FEEDBACK,
     TaskMessage, get_broker,
 )
 from infrastructure.task_store import (
     task_create, task_get, task_update, task_transition,
-    task_is_cancelled, task_clear_cancel,
+    task_is_cancelled, task_clear_cancel, feedback_transition,
     task_heartbeat, task_publish_token, get_task_timeout,
     HEARTBEAT_INTERVAL_S,
 )
@@ -117,7 +118,12 @@ def run_graph(task_id: str, payload: dict) -> dict:
 
     task_update(task_id, sql=sql, exec_result=_sanitize(exec_result),
                 token_usage=accumulated.get("token_usage", {}),
-                node_timings=accumulated.get("node_latency", {}))
+                node_timings=accumulated.get("node_latency", {}),
+                # Persist context for feedback rounds
+                _schema_text=accumulated.get("schema_text", ""),
+                _notes_text=accumulated.get("notes_text", ""),
+                _fewshot_text=accumulated.get("fewshot_text", ""),
+                _original_payload=payload)
 
     broker.publish(TOPIC_RESULT, TaskMessage(
         task_id=task_id, event="success",
@@ -184,6 +190,184 @@ def _sanitize(result: dict | None) -> dict | None:
     return out
 
 
+# ── Feedback graph runner ─────────────────────────────────────────────────────
+
+def run_feedback_graph(task_id: str, payload: dict) -> dict:
+    """Execute a human-feedback correction round using the feedback sub-graph.
+
+    Loads preserved schema/few-shot context from Redis, injects user_feedback
+    into state, and runs Refiner → Generator → Guard → Voter → SemCheck.
+    """
+    from agent.graphs.feedback_graph import create_feedback_graph
+
+    # Load preserved context from Redis (set during initial run_graph)
+    task_state = task_get(task_id) or {}
+    db_id = payload.get("db_id", task_state.get("db_id", ""))
+    database_url = payload.get("database_url", task_state.get("database_url", ""))
+
+    initial_state = {
+        # Core context from original task
+        "question": payload.get("question", task_state.get("question", "")),
+        "db_id": db_id,
+        "database_url": database_url,
+        "schema_text": task_state.get("_schema_text", ""),
+        "notes_text": task_state.get("_notes_text", ""),
+        "fewshot_text": task_state.get("_fewshot_text", ""),
+        # Previous result (for Refiner context)
+        "sql": payload.get("sql", task_state.get("sql", "")),
+        "last_sql": payload.get("sql", task_state.get("sql", "")),
+        "exec_result": payload.get("exec_result") or task_state.get("exec_result"),
+        # User feedback (Refiner reads this first)
+        "user_feedback": payload.get("feedback", ""),
+        # Conversation history
+        "conversation_turns": payload.get("conversation_turns", []),
+        # Correction control
+        "retry_count": 0,
+        "max_retries": 2,
+        "is_feedback_round": True,
+        # RAG / fewshot flags
+        "rag_schema": payload.get("rag_schema", True),
+        "rag_domain": payload.get("rag_domain", True),
+        "rag_k": payload.get("rag_k", 8),
+        "fewshot_enabled": payload.get("fewshot_enabled", True),
+        "multi_candidate": payload.get("multi_candidate", True),
+    }
+
+    graph = create_feedback_graph()
+    t0 = time.time()
+    broker = get_broker()
+    accumulated = dict(initial_state)
+
+    import agent.nodes.generator as gen_mod
+
+    def _on_token(text: str):
+        task_publish_token(task_id, text)
+
+    gen_mod.set_token_callback(_on_token)
+
+    try:
+        for step in graph.stream(initial_state, stream_mode="updates"):
+            if task_is_cancelled(task_id):
+                _log.info("Task %s (feedback) cancelled mid-execution", task_id)
+                task_transition(task_id, "CANCELLED")
+                broker.publish(TOPIC_STATUS, TaskMessage(
+                    task_id=task_id, event="cancelled",
+                    payload={"node": "feedback"},
+                ))
+                task_clear_cancel(task_id)
+                return {"_cancelled": True}
+
+            for node_name, node_output in step.items():
+                if isinstance(node_output, dict):
+                    accumulated.update(node_output)
+
+                summary = _summarize_node(node_name, accumulated)
+                broker.publish(TOPIC_STATUS, TaskMessage(
+                    task_id=task_id, event="node_done",
+                    payload={"node": node_name, "summary": summary},
+                ))
+
+                task_update(task_id, node=node_name, progress=_node_progress(node_name),
+                            sql=accumulated.get("sql") or accumulated.get("chosen_sql"),
+                            token_usage=accumulated.get("token_usage", {}),
+                            node_timings=accumulated.get("node_latency", {}))
+    finally:
+        gen_mod.set_token_callback(None)
+
+    elapsed = round(time.time() - t0, 2)
+    sql = accumulated.get("sql") or accumulated.get("chosen_sql", "")
+    exec_result = accumulated.get("exec_result")
+
+    # Append this turn to conversation history
+    conversation_turns = list(initial_state.get("conversation_turns", []))
+    conversation_turns.append({
+        "turn": len(conversation_turns) + 1,
+        "user_feedback": payload.get("feedback", ""),
+        "sql": sql,
+        "exec_result": _sanitize(exec_result),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+    task_update(task_id, sql=sql, exec_result=_sanitize(exec_result),
+                token_usage=accumulated.get("token_usage", {}),
+                node_timings=accumulated.get("node_latency", {}),
+                conversation_turns=conversation_turns,
+                user_feedback="")  # Clear for next round
+
+    broker.publish(TOPIC_RESULT, TaskMessage(
+        task_id=task_id, event="success",
+        payload={
+            "sql": sql,
+            "exec_result": _sanitize(exec_result),
+            "token_usage": accumulated.get("token_usage", {}),
+            "node_timings": accumulated.get("node_latency", {}),
+            "elapsed_s": elapsed,
+            "turn": len(conversation_turns),
+        },
+    ))
+
+    return accumulated
+
+
+def handle_feedback(msg: TaskMessage) -> None:
+    """Kafka callback for feedback messages — run a correction round."""
+    task_id = msg.task_id
+    payload = msg.payload or {}
+    turn = payload.get("turn", 1)
+
+    # Skip if already RUNNING (duplicate submit prevention)
+    existing = task_get(task_id)
+    if existing and existing.get("status") == "RUNNING":
+        _log.warning("Task %s already RUNNING — skipping duplicate feedback", task_id)
+        return
+
+    feedback_transition(task_id)
+    broker = get_broker()
+    broker.publish(TOPIC_STATUS, TaskMessage(
+        task_id=task_id, event="running",
+        payload={"source": "feedback", "turn": turn},
+    ))
+
+    heartbeat_stop = threading.Event()
+
+    def _heartbeat_loop():
+        while not heartbeat_stop.is_set():
+            task_heartbeat(task_id)
+            heartbeat_stop.wait(HEARTBEAT_INTERVAL_S)
+
+    hb_thread = threading.Thread(target=_heartbeat_loop, daemon=True, name=f"hb-{task_id}")
+    hb_thread.start()
+
+    try:
+        pool = ThreadPoolExecutor(max_workers=1)
+        try:
+            fut = pool.submit(run_feedback_graph, task_id, payload)
+            result = fut.result(timeout=get_task_timeout(0))
+            if not result.get("_cancelled"):
+                task_transition(task_id, "SUCCESS")
+        except FutureTimeoutError:
+            _log.warning("Feedback turn %d for task %s timed out", turn, task_id)
+            task_transition(task_id, "TIMEOUT",
+                            error=f"Feedback turn {turn} timed out")
+            broker.publish(TOPIC_STATUS, TaskMessage(
+                task_id=task_id, event="timeout",
+                payload={"source": "feedback", "turn": turn},
+            ))
+        finally:
+            pool.shutdown(wait=False)
+    except Exception as e:
+        err_msg = f"{type(e).__name__}: {str(e)[:300]}"
+        _log.error("Feedback turn %d for task %s failed: %s", turn, task_id, err_msg)
+        task_transition(task_id, "FAILED", error=err_msg)
+        broker.publish(TOPIC_STATUS, TaskMessage(
+            task_id=task_id, event="failed",
+            payload={"error": err_msg, "source": "feedback", "turn": turn},
+        ))
+    finally:
+        heartbeat_stop.set()
+        hb_thread.join(timeout=2)
+
+
 # ── Message handler ──────────────────────────────────────────────────────────
 
 def handle_task(msg: TaskMessage) -> None:
@@ -221,17 +405,25 @@ def handle_task(msg: TaskMessage) -> None:
         pool = ThreadPoolExecutor(max_workers=1)
         try:
             fut = pool.submit(run_graph, task_id, payload)
-            fut.result(timeout=timeout_s)
-            task_transition(task_id, "SUCCESS")
+            result = fut.result(timeout=timeout_s)
+            # If cancelled mid-execution, run_graph already set CANCELLED; don't overwrite
+            if result.get("_cancelled"):
+                _log.info("Task %s was cancelled — not marking SUCCESS", task_id)
+            else:
+                task_transition(task_id, "SUCCESS")
         except FutureTimeoutError:
             _log.warning("Task %s timed out after %ds (retry %d)",
                         task_id, timeout_s, retry_count)
-            task_transition(task_id, "TIMEOUT",
-                            error=f"Task timed out after {timeout_s}s")
-            broker.publish(TOPIC_STATUS, TaskMessage(
-                task_id=task_id, event="timeout",
-                payload={"retry_count": retry_count, "timeout_s": timeout_s},
-            ))
+            if task_is_cancelled(task_id):
+                task_transition(task_id, "CANCELLED", error="Cancelled during execution")
+                task_clear_cancel(task_id)
+            else:
+                task_transition(task_id, "TIMEOUT",
+                                error=f"Task timed out after {timeout_s}s")
+                broker.publish(TOPIC_STATUS, TaskMessage(
+                    task_id=task_id, event="timeout",
+                    payload={"retry_count": retry_count, "timeout_s": timeout_s},
+                ))
         finally:
             pool.shutdown(wait=False)
     except Exception as e:
@@ -239,7 +431,13 @@ def handle_task(msg: TaskMessage) -> None:
         _log.error("Task %s failed (attempt %d/%d): %s",
                    task_id, retry_count + 1, MAX_RETRIES + 1, err_msg)
 
-        if retry_count < MAX_RETRIES:
+        if task_is_cancelled(task_id):
+            # Cancelled mid-execution — don't retry
+            _log.info("Task %s was cancelled — skipping retry", task_id)
+            task_transition(task_id, "CANCELLED",
+                            error=f"Cancelled after error: {err_msg}")
+            task_clear_cancel(task_id)
+        elif retry_count < MAX_RETRIES:
             # Re-publish to request topic with incremented retry count
             payload["_retry_count"] = retry_count + 1
             payload["_last_error"] = err_msg
@@ -291,14 +489,13 @@ def main():
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
-    _log.info("Worker listening on topics: %s", TOPIC_REQUEST)
+    _log.info("Worker listening on topics: %s, %s", TOPIC_REQUEST, TOPIC_FEEDBACK)
 
     # Kafka consumer loop runs in foreground; signal handler sets running=False
-    # which stops the iterator after the current poll cycle
     try:
         from kafka import KafkaConsumer
         consumer = KafkaConsumer(
-            TOPIC_REQUEST,
+            TOPIC_REQUEST, TOPIC_FEEDBACK,
             bootstrap_servers=broker.bootstrap_servers,
             group_id="nl2sql-worker",
             client_id="nl2sql-worker-consumer",
@@ -316,11 +513,14 @@ def main():
                         break
                     try:
                         msg = TaskMessage.from_json(record.value)
-                        handle_task(msg)
+                        if record.topic == TOPIC_FEEDBACK:
+                            handle_feedback(msg)
+                        else:
+                            handle_task(msg)
                         consumer.commit()
                     except Exception as e:
-                        _log.error("Unhandled error in task %s: %s",
-                                   record.key.decode() if record.key else "?", e)
+                        _log.error("Unhandled error in topic %s task %s: %s",
+                                   record.topic, record.key.decode() if record.key else "?", e)
         consumer.close()
     except Exception as e:
         _log.error("Kafka consumer failed: %s", e)

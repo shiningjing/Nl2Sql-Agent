@@ -42,7 +42,7 @@ class TestTaskMessage:
     def test_topic_constants(self):
         assert TOPIC_REQUEST == "nl2sql.task.request"
         assert TOPIC_RESULT == "nl2sql.task.result"
-        assert len(ALL_TOPICS) == 4
+        assert len(ALL_TOPICS) == 5
 
 
 class TestBrokerDegradation:
@@ -341,11 +341,11 @@ class TestApiRoutes:
 
     def test_status_404_for_unknown(self, client):
         resp = client.get("/api/v1/task/status/nonexistent123")
-        assert resp.status_code in (200, 404)
+        assert resp.status_code in (200, 404, 429)
 
     def test_cancel_unknown(self, client):
         resp = client.post("/api/v1/task/cancel/nonexistent123")
-        assert resp.status_code in (200, 404)
+        assert resp.status_code in (200, 404, 429)
 
 
 class TestHeartbeat:

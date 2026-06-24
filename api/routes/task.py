@@ -17,11 +17,14 @@ from api.models import (
     TaskSubmitResponse,
     TaskStatusResponse,
     TaskCancelResponse,
+    TaskFeedbackRequest,
+    TaskFeedbackResponse,
 )
-from infrastructure.broker import TaskMessage, TOPIC_REQUEST, get_broker
+from infrastructure.broker import TaskMessage, TOPIC_REQUEST, TOPIC_FEEDBACK, get_broker
 from infrastructure.task_store import (
     task_create, task_get, task_request_cancel,
     task_get_heartbeat, scan_stale_tasks,
+    feedback_transition, TASK_FEEDBACK_MAX_TURNS,
     idempotent_check, idempotent_set,
     HEARTBEAT_STALE_S,
 )
@@ -251,3 +254,48 @@ async def task_stream(task_id: str):
                     pass
 
     return EventSourceResponse(event_generator())
+
+
+# ── Human-Feedback ────────────────────────────────────────────────────────────
+
+@router.post("/task/{task_id}/feedback", response_model=TaskFeedbackResponse, status_code=202)
+def task_feedback(task_id: str, req: TaskFeedbackRequest):
+    """Submit human correction guidance for a completed task.
+
+    Triggers a feedback correction round: Worker loads the task context
+    (schema, few-shot, previous results) and runs the feedback graph
+    (Refiner → Generator → Guard → Voter → SemCheck).
+    """
+    state = task_get(task_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Task not found or expired")
+    cur_status = state.get("status", "")
+    if cur_status not in ("SUCCESS", "FAILED"):
+        raise HTTPException(status_code=400,
+                            detail=f"Feedback only allowed on SUCCESS tasks (current: {cur_status})")
+
+    turns = state.get("conversation_turns", [])
+    turn_number = len(turns) + 1
+    if turn_number > TASK_FEEDBACK_MAX_TURNS:
+        raise HTTPException(status_code=400,
+                            detail=f"Maximum feedback turns ({TASK_FEEDBACK_MAX_TURNS}) reached")
+
+    # Publish to feedback topic for Worker to pick up
+    broker = get_broker()
+    msg = TaskMessage(task_id=task_id, event="feedback", payload={
+        "feedback": req.feedback,
+        "turn": turn_number,
+        "question": state.get("question", ""),
+        "db_id": state.get("db_id", ""),
+        "database_url": state.get("database_url", ""),
+        "sql": state.get("sql", ""),
+        "exec_result": state.get("exec_result"),
+        "conversation_turns": turns,
+        "token_usage": state.get("token_usage", {}),
+        "node_timings": state.get("node_timings", {}),
+    })
+    broker.publish(TOPIC_FEEDBACK, msg)
+
+    feedback_transition(task_id)
+
+    return TaskFeedbackResponse(task_id=task_id, status="accepted", turn=turn_number)

@@ -32,6 +32,7 @@ TTL_TERMINAL_GOOD = 86400   # SUCCESS / FAILED / CANCELLED: 24h
 TTL_TERMINAL_BAD = 3600     # TIMEOUT: 1h
 TTL_IDEMPOTENT = 300        # idempotency key: 5 min
 TTL_CANCEL_FLAG = 3600      # cancel flag: 1h
+TASK_FEEDBACK_MAX_TURNS = 10
 
 
 def _now_iso() -> str:
@@ -120,6 +121,18 @@ def _valid_transition(current: dict | None, next_status: str) -> bool:
 
 
 # ── Cancel ───────────────────────────────────────────────────────────────────
+
+def feedback_transition(task_id: str) -> dict | None:
+    """Transition SUCCESS/FAILED → RUNNING for a human-feedback round."""
+    current = task_get(task_id)
+    if current is None:
+        return None
+    cur_status = current.get("status")
+    if cur_status not in ("SUCCESS", "FAILED"):
+        _log.warning("Feedback only allowed on SUCCESS/FAILED tasks (current: %s)", cur_status)
+        return current
+    return task_update(task_id, status="RUNNING", node=None, progress=0)
+
 
 def task_request_cancel(task_id: str) -> bool:
     r = _get_redis()

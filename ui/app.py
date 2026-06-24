@@ -31,6 +31,8 @@ if "next_idx" not in st.session_state:
     st.session_state.next_idx = 0
 if "page" not in st.session_state:
     st.session_state.page = "query"
+if "conversation" not in st.session_state:
+    st.session_state.conversation = None
 
 # Settings defaults
 if "selected_db_name" not in st.session_state:
@@ -176,18 +178,21 @@ def _call_api_async(question: str, db_id: str, database_url: str) -> dict:
                         progress.empty()
                         exec_result = data.get("exec_result")
                         return {
+                            "task_id": task_id,
                             "sql": data.get("sql", ""),
                             "exec_result": exec_result,
                             "token_usage": data.get("token_usage", {}),
-                            "elapsed_ms": 0,
-                            "rag_chunks": [],
+                            "elapsed_ms": data.get("elapsed_ms", 0),
+                            "rag_chunks": data.get("rag_chunks", []),
                             "node_timings": data.get("node_timings", {}),
-                            "raw_response": "",
+                            "raw_response": data.get("raw_response", ""),
+                            "voter_candidates": data.get("voter_candidates", []),
                         }
 
                     elif current_event in ("error", "timeout"):
                         progress.empty()
-                        return {"sql": sql_preview, "exec_result": {"success": False, "error": data.get("error", "task failed")},
+                        return {"task_id": task_id, "sql": sql_preview,
+                                "exec_result": {"success": False, "error": data.get("error", "task failed")},
                                 "token_usage": {}, "elapsed_ms": 0, "rag_chunks": [], "node_timings": {}, "raw_response": ""}
 
                     current_event = None
@@ -199,6 +204,134 @@ def _call_api_async(question: str, db_id: str, database_url: str) -> dict:
         progress.empty()
         return {"sql": "", "exec_result": {"success": False, "error": f"Stream error: {e}"},
                 "token_usage": {}, "elapsed_ms": 0, "rag_chunks": [], "node_timings": {}, "raw_response": str(e)}
+
+
+def _call_feedback_async(task_id: str, feedback: str) -> dict:
+    """Submit human feedback → stream corrected result via /task/{id}/stream."""
+    import httpx
+
+    # Step 1: submit feedback
+    try:
+        resp = httpx.post(
+            f"{API_BASE}/api/v1/task/{task_id}/feedback",
+            json={"feedback": feedback},
+            timeout=10,
+        )
+        if resp.status_code != 202:
+            return {"task_id": task_id, "sql": "",
+                    "exec_result": {"success": False, "error": f"Feedback submission failed ({resp.status_code})"},
+                    "token_usage": {}, "node_timings": {}}
+    except Exception as e:
+        return {"task_id": task_id, "sql": "",
+                "exec_result": {"success": False, "error": f"Feedback error: {e}"},
+                "token_usage": {}, "node_timings": {}}
+
+    # Step 2: stream SSE (reuse same /task/{id}/stream endpoint)
+    progress = st.empty()
+    node_list = ["refiner"]
+    token_buffer = ""
+
+    try:
+        with httpx.stream("GET", f"{API_BASE}/api/v1/task/{task_id}/stream", timeout=360) as resp:
+            current_event = None
+            for line in resp.iter_lines():
+                if line.startswith("event:"):
+                    current_event = line[6:].strip()
+                elif line.startswith("data:") and current_event:
+                    data_str = line[5:].strip()
+                    try:
+                        data = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+
+                    if current_event == "token":
+                        token_buffer += data.get("text", "")
+                        with progress.container():
+                            st.caption(" -> ".join(node_list + ["generating..."]))
+                            st.code(token_buffer, language="sql")
+
+                    elif current_event == "node_done":
+                        node = data.get("node", "?")
+                        if node not in node_list:
+                            node_list.append(node)
+
+                    elif current_event == "complete":
+                        progress.empty()
+                        exec_result = data.get("exec_result")
+                        return {
+                            "task_id": task_id,
+                            "sql": data.get("sql", ""),
+                            "exec_result": exec_result,
+                            "token_usage": data.get("token_usage", {}),
+                            "node_timings": data.get("node_timings", {}),
+                            "raw_response": "",
+                            "turn": data.get("turn", 1),
+                        }
+
+                    elif current_event in ("error", "timeout"):
+                        progress.empty()
+                        return {"task_id": task_id, "sql": token_buffer,
+                                "exec_result": {"success": False, "error": data.get("error", "correction failed")},
+                                "token_usage": {}, "node_timings": {}}
+
+                    current_event = None
+
+        progress.empty()
+        return {"task_id": task_id, "sql": token_buffer,
+                "exec_result": {"success": False, "error": "stream ended without completion"},
+                "token_usage": {}, "node_timings": {}}
+    except Exception as e:
+        progress.empty()
+        return {"task_id": task_id, "sql": "",
+                "exec_result": {"success": False, "error": f"Stream error: {e}"},
+                "token_usage": {}, "node_timings": {}}
+
+
+def _export_history_json() -> str:
+    """Serialize entire history to JSON for download."""
+    data = []
+    for h in st.session_state.history:
+        data.append({
+            "idx": h.get("idx"),
+            "time": h.get("time"),
+            "db_name": h.get("db_name"),
+            "db_id": h.get("db_id"),
+            "question": h.get("question"),
+            "sql": h.get("sql"),
+            "status": h.get("status"),
+            "result": h.get("result", {}),
+        })
+    return json.dumps(data, ensure_ascii=False, indent=2, default=str)
+
+
+def _export_conversation_md(conv: dict) -> str:
+    """Export active conversation as Markdown."""
+    lines = [
+        f"# NL2SQL Conversation",
+        f"",
+        f"**Question:** {conv.get('question', '?')}",
+        f"**Database:** {conv.get('db_id', '?')}",
+        f"**Turns:** {len(conv.get('turns', []))}",
+        f"",
+    ]
+    for i, turn in enumerate(conv.get("turns", []), 1):
+        lines.append(f"## Turn {i}")
+        fb = turn.get("user_feedback") or "(initial query)"
+        lines.append(f"**Feedback:** {fb}")
+        sql = turn.get("sql", "")
+        if sql:
+            lines.append(f"")
+            lines.append(f"```sql")
+            lines.append(sql)
+            lines.append(f"```")
+        exec_result = turn.get("exec_result") or {}
+        if exec_result.get("success"):
+            lines.append(f"**Result:** {exec_result.get('row_count', 0)} rows")
+            lines.append(f"Columns: {', '.join(str(c) for c in exec_result.get('columns', []))}")
+        else:
+            lines.append(f"**Error:** {exec_result.get('error', 'N/A')}")
+        lines.append("")
+    return "\n".join(lines)
 
 
 # ── Waterfall chart ──
@@ -267,7 +400,28 @@ def render_result(result: dict, question: str):
     node_timings = result.get("node_timings", {})
     rag_chunks = result.get("rag_chunks", [])
 
-    tab1, tab2, tab3, tab4 = st.tabs(["SQL", "Results", "Trace", "RAG"])
+    # Thinking-process expander (collapsed by default)
+    has_thinking = bool(node_timings) or bool(result.get("raw_response")) or bool(result.get("voter_candidates"))
+    if has_thinking:
+        with st.expander("Thinking process", expanded=False):
+            if node_timings:
+                order = ["router", "schema_retriever", "decomposer", "fewshot_selector",
+                         "generator", "guard", "executor", "voter", "semantic_check", "refiner"]
+                flow_items = [f"{n} ({node_timings[n]:.1f}s)" for n in order if n in node_timings]
+                st.caption("  →  ".join(flow_items))
+            voters = result.get("voter_candidates", [])
+            if voters:
+                st.divider()
+                st.caption(f"Voter candidates ({len(voters)}):")
+                for c in voters:
+                    st.code(c.get("sql", ""), language="sql")
+            raw = result.get("raw_response", "")
+            if raw:
+                st.divider()
+                st.caption("Raw LLM output:")
+                st.text(raw[:2000])
+
+    tab1, tab2, tab3 = st.tabs(["SQL", "Results", "Trace"])
 
     with tab1:
         if sql:
@@ -298,26 +452,11 @@ def render_result(result: dict, question: str):
         c1.metric("Prompt Tokens", f"{prompt_tok:,}")
         c2.metric("Completion Tokens", f"{comp_tok:,}")
         c3.metric("Total Tokens", f"{total_tok:,}")
-
         elapsed = result.get("elapsed_ms", 0)
         if elapsed:
             st.metric("Total Time", f"{elapsed/1000:.1f}s" if elapsed > 1000 else f"{elapsed:.0f}ms")
-
         if node_timings:
             _render_waterfall(node_timings)
-
-    with tab4:
-        if rag_chunks:
-            schema_count = sum(1 for c in rag_chunks if c.get("chunk_type") == "schema")
-            domain_count = len(rag_chunks) - schema_count
-            st.caption(f"Schema chunks: {schema_count}, Domain chunks: {domain_count}")
-            for c in rag_chunks:
-                ctype = c.get("chunk_type", "?")
-                src = c.get("source", "?")
-                with st.expander(f"[{ctype}] {src}"):
-                    st.text(c.get("preview", "")[:500])
-        else:
-            st.caption("(RAG context not loaded in streaming mode — open a non-streaming query to see)")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -325,7 +464,24 @@ def render_result(result: dict, question: str):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def render_settings():
-    st.title("Settings")
+    # Top bar: back arrow + title
+    c_back, c_title = st.columns([0.5, 20])
+    with c_back:
+        st.markdown(
+            '<style>'
+            '[data-testid="stBaseButton-tertiary"], [data-testid="stBaseButton-tertiary"] * {'
+            'font-size:28pt !important; color:#000 !important;'
+            'padding:0 !important; line-height:1 !important;'
+            'border:none !important; background:transparent !important;'
+            'min-height:unset !important; height:auto !important; width:auto !important;'
+            '}</style>',
+            unsafe_allow_html=True,
+        )
+        if st.button("←", key="goto_query", type="tertiary"):
+            st.session_state.page = "query"
+            st.rerun()
+    with c_title:
+        st.markdown('<h1 style="margin:0;line-height:1;">Settings</h1>', unsafe_allow_html=True)
 
     col1, col2 = st.columns(2)
 
@@ -420,7 +576,24 @@ def render_query():
     if st.session_state.selected_db_name is None:
         st.session_state.selected_db_name = db.display_name
 
-    st.title("NL2SQL Agent — BIRD")
+    # Top bar: gear + title
+    c_gear, c_title = st.columns([0.5, 20])
+    with c_gear:
+        st.markdown(
+            '<style>'
+            '[data-testid="stBaseButton-tertiary"], [data-testid="stBaseButton-tertiary"] * {'
+            'font-size:28pt !important; color:#000 !important;'
+            'padding:0 !important; line-height:1 !important;'
+            'border:none !important; background:transparent !important;'
+            'min-height:unset !important; height:auto !important; width:auto !important;'
+            '}</style>',
+            unsafe_allow_html=True,
+        )
+        if st.button("⚙", key="goto_settings", type="tertiary"):
+            st.session_state.page = "settings"
+            st.rerun()
+    with c_title:
+        st.markdown("##### NL2SQL Agent")
 
     # History browsing
     if st.session_state.selected_idx is not None:
@@ -435,46 +608,153 @@ def render_query():
                 st.session_state.selected_idx = None
                 st.rerun()
 
-    # Chat input
-    question = st.chat_input(f"Ask a data question about {db.display_name}...")
+    # ── Active conversation display ──
+    conv = st.session_state.conversation
+    if conv:
+        # Phase 1: new conversation needs API call (in-flight init)
+        if conv.pop("_needs_init", False):
+            with st.chat_message("user"):
+                st.write(conv["question"])
+            with st.chat_message("assistant"):
+                with st.spinner("Running pipeline..."):
+                    result = _call_api_async(conv["question"], conv["db_id"], conv["database_url"])
 
-    # Handle pending question (from sample click)
+                conv["task_id"] = result.get("task_id")
+                conv["turns"].append({
+                    "turn": 0,
+                    "user_feedback": None,
+                    "sql": result.get("sql", ""),
+                    "exec_result": result.get("exec_result"),
+                    "token_usage": result.get("token_usage", {}),
+                    "node_timings": result.get("node_timings", {}),
+                    "elapsed_ms": result.get("elapsed_ms", 0),
+                    "rag_chunks": result.get("rag_chunks", []),
+                    "raw_response": result.get("raw_response", ""),
+                    "voter_candidates": result.get("voter_candidates", []),
+                })
+                # Save to history
+                sql = result.get("sql", "")
+                exec_result = result.get("exec_result")
+                status = "ok" if (exec_result and exec_result.get("success")) else "fail"
+                idx = st.session_state.next_idx
+                st.session_state.next_idx += 1
+                st.session_state.history.append({
+                    "idx": idx,
+                    "question": conv["question"],
+                    "sql": sql,
+                    "result": _snapshot_result(result),
+                    "time": datetime.now().strftime("%H:%M:%S"),
+                    "status": status,
+                    "db_name": st.session_state.selected_db_name,
+                    "db_id": conv["db_id"],
+                })
+            st.rerun()
+
+        # Phase 2: render conversation (each turn as separate chat_message bubbles)
+        turns = conv.get("turns", [])
+        if turns:
+            st.chat_message("user").write(conv["question"])
+
+            for i, turn in enumerate(turns):
+                is_latest = (i == len(turns) - 1)
+                turn_num = i + 1
+
+                # User feedback bubble
+                if turn.get("user_feedback"):
+                    st.chat_message("user").write(turn["user_feedback"])
+
+                # Assistant response bubble
+                with st.chat_message("assistant"):
+                    if not is_latest:
+                        st.caption(f"Turn {turn_num}")
+                    turn_result = {
+                        "sql": turn.get("sql", ""),
+                        "exec_result": turn.get("exec_result"),
+                        "token_usage": turn.get("token_usage", {}),
+                        "node_timings": turn.get("node_timings", {}),
+                        "elapsed_ms": turn.get("elapsed_ms", 0),
+                        "rag_chunks": turn.get("rag_chunks", []),
+                        "raw_response": turn.get("raw_response", ""),
+                        "voter_candidates": turn.get("voter_candidates", []),
+                    }
+                    render_result(turn_result, conv["question"])
+
+    # ── Single input box (auto-detect: feedback mode or new-question mode) ──
+    turns = conv.get("turns", []) if conv else []
+    latest_exec = turns[-1].get("exec_result") if turns else None
+    in_feedback_mode = bool(conv and turns and latest_exec and latest_exec.get("success"))
+
+    if in_feedback_mode:
+        placeholder = "Not satisfied? Provide correction guidance..."
+    elif conv:
+        placeholder = f"Or ask a new question about {db.display_name}..."
+    else:
+        placeholder = f"Ask a data question about {db.display_name}..."
+
+    question = st.chat_input(placeholder)
+
+    # Handle pending question (from sample click) — always treated as new question
+    from_sample = False
     if "pending_question" in st.session_state and st.session_state.pending_question:
         question = st.session_state.pending_question
         st.session_state.pending_question = None
+        from_sample = True
 
     if question:
-        st.session_state.selected_idx = None
-
-        with st.chat_message("user"):
-            st.write(question)
-
-        with st.chat_message("assistant"):
-            with st.spinner("Running pipeline..."):
-                result = _call_api_async(question, db.db_id, db.database_url)
-
-            # Save to history first — so rendering errors don't lose the result
-            sql = result.get("sql", "")
-            exec_result = result.get("exec_result")
-            status = "ok" if (exec_result and exec_result.get("success")) else "fail"
-
-            idx = st.session_state.next_idx
-            st.session_state.next_idx += 1
-            st.session_state.history.append({
-                "idx": idx,
+        if in_feedback_mode and not from_sample:
+            _process_feedback(question, conv, db)
+        else:
+            st.session_state.selected_idx = None
+            st.session_state.conversation = {
                 "question": question,
-                "sql": sql,
-                "result": _snapshot_result(result),
-                "time": datetime.now().strftime("%H:%M:%S"),
-                "status": status,
-                "db_name": st.session_state.selected_db_name,
                 "db_id": db.db_id,
-            })
+                "database_url": db.database_url,
+                "task_id": None,
+                "turns": [],
+                "_needs_init": True,
+            }
+            st.rerun()
 
-            try:
-                render_result(result, question)
-            except Exception as e:
-                st.error(f"Render error: {e}")
+
+def _process_feedback(feedback: str, conv: dict, db):
+    """Submit feedback and stream corrected result. Called when feedback chat_input has content."""
+    from datetime import datetime
+
+    with st.spinner("Applying correction..."):
+        result = _call_feedback_async(conv["task_id"], feedback)
+
+    # Append new turn
+    conv["turns"].append({
+        "turn": len(conv["turns"]) + 1,
+        "user_feedback": feedback,
+        "sql": result.get("sql", ""),
+        "exec_result": result.get("exec_result"),
+        "token_usage": result.get("token_usage", {}),
+        "node_timings": result.get("node_timings", {}),
+        "elapsed_ms": result.get("elapsed_ms", 0),
+        "rag_chunks": result.get("rag_chunks", []),
+        "raw_response": result.get("raw_response", ""),
+        "voter_candidates": result.get("voter_candidates", []),
+    })
+
+    # Save to history
+    sql = result.get("sql", "")
+    exec_result = result.get("exec_result")
+    status = "ok" if (exec_result and exec_result.get("success")) else "fail"
+    idx = st.session_state.next_idx
+    st.session_state.next_idx += 1
+    st.session_state.history.append({
+        "idx": idx,
+        "question": f"[Correction] {conv['question']}",
+        "sql": sql,
+        "result": _snapshot_result(result),
+        "time": datetime.now().strftime("%H:%M:%S"),
+        "status": status,
+        "db_name": st.session_state.selected_db_name,
+        "db_id": db.db_id,
+    })
+
+    st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -482,15 +762,11 @@ def render_query():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with st.sidebar:
-    # Page toggle button
-    if st.session_state.page == "query":
-        if st.button("Settings", use_container_width=True, type="secondary"):
-            st.session_state.page = "settings"
-            st.rerun()
-    else:
-        if st.button("Back to Query", use_container_width=True, type="primary"):
-            st.session_state.page = "query"
-            st.rerun()
+    # [＋新对话] button at top
+    if st.button("New Chat", use_container_width=True):
+        st.session_state.conversation = None
+        st.session_state.selected_idx = None
+        st.rerun()
 
     st.divider()
 
@@ -552,7 +828,35 @@ with st.sidebar:
     st.divider()
 
     # History
-    st.subheader("History")
+    if "export_open" not in st.session_state:
+        st.session_state.export_open = False
+
+    col_hist, col_dots = st.columns([15, 1])
+    with col_hist:
+        st.subheader("History")
+    with col_dots:
+        if st.button("···" if not st.session_state.export_open else "✕", key="export_toggle"):
+            st.session_state.export_open = not st.session_state.export_open
+            st.rerun()
+
+    if st.session_state.export_open:
+        c1, c2 = st.columns(2)
+        with c1:
+            export_data = _export_history_json()
+            st.download_button(
+                "Export JSON", export_data, "nl2sql_history.json",
+                mime="application/json", use_container_width=True,
+                disabled=not st.session_state.history,
+            )
+        with c2:
+            conv = st.session_state.conversation
+            has_conv = bool(conv and conv.get("turns"))
+            md_data = _export_conversation_md(conv) if has_conv else ""
+            st.download_button(
+                "Export MD", md_data, "nl2sql_conversation.md",
+                mime="text/markdown", use_container_width=True,
+                disabled=not has_conv,
+            )
 
     if st.button("Clear History", use_container_width=True):
         st.session_state.history = []
@@ -565,9 +869,17 @@ with st.sidebar:
             icon = ":white_check_mark:" if h["status"] == "ok" else ":x:"
             db_tag = f"[{h.get('db_name', '?')}]"
             label = f"{icon} {db_tag} {h['question'][:35]}{'...' if len(h['question']) > 35 else ''}"
-            if st.button(label, key=f"hist_{h['idx']}", use_container_width=True):
-                st.session_state.selected_idx = h["idx"]
-                st.rerun()
+            col_sel, col_del = st.columns([8, 2])
+            with col_sel:
+                if st.button(label, key=f"hist_{h['idx']}", use_container_width=True):
+                    st.session_state.selected_idx = h["idx"]
+                    st.rerun()
+            with col_del:
+                if st.button("✕", key=f"del_{h['idx']}", use_container_width=True):
+                    st.session_state.history = [x for x in st.session_state.history if x["idx"] != h["idx"]]
+                    if st.session_state.selected_idx == h["idx"]:
+                        st.session_state.selected_idx = None
+                    st.rerun()
 
         if st.session_state.selected_idx is not None:
             sel = next((h for h in st.session_state.history if h["idx"] == st.session_state.selected_idx), None)

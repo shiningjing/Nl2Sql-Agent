@@ -10,7 +10,7 @@ from storage.redis_cache import get_redis
 from observability.logger import TraceLogger
 
 _RATE_LIMIT_WINDOW = 60        # 1 minute
-_RATE_LIMIT_MAX = 10           # 10 requests per window per IP
+_RATE_LIMIT_MAX = 100          # 100 requests per window per IP
 _RATE_LIMIT_PREFIX = "rate_limit"
 
 

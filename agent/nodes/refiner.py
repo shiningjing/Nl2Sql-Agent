@@ -216,6 +216,56 @@ def _format_semantic_feedback(feedback: str, sql: str, exec_result: dict) -> str
     return "\n".join(lines)
 
 
+def _format_user_feedback(feedback: str, sql: str, exec_result: dict,
+                          conversation_turns: list[dict] | None = None) -> str:
+    """Format human guidance with conversation history for the Generator.
+
+    Structure:
+      ## PREVIOUS ATTEMPTS  (only if conversation_turns is non-empty)
+      ## CURRENT GUIDANCE
+      ## CURRENT SQL (for reference)
+
+    Unlike automated errors, the old SQL is presented as "for reference" (not
+    "DO NOT REPEAT") because parts of it may be correct.
+    """
+    lines = ["## CORRECTION FEEDBACK"]
+
+    # ── Conversation history (multi-turn memory) ──
+    turns = conversation_turns or []
+    if turns:
+        lines.append("\n## PREVIOUS ATTEMPTS")
+        for t in turns:
+            turn_num = t.get("turn", "?")
+            fb = t.get("user_feedback", "")
+            prev_sql = t.get("sql", "")
+            prev_exec = t.get("exec_result") or {}
+            lines.append(f"Turn {turn_num} — \"{fb}\"")
+            if prev_sql:
+                lines.append(f"  → SQL: {prev_sql[:200]}")
+            if prev_exec:
+                rc = prev_exec.get("row_count", 0)
+                cols = prev_exec.get("columns", [])
+                if cols:
+                    lines.append(f"  → Result: {rc} rows [{', '.join(str(c) for c in cols[:8])}]")
+                    data = prev_exec.get("data", []) or []
+                    if data:
+                        preview = " | ".join(", ".join(str(v)[:15] for v in row[:4]) for row in data[:2])
+                        lines.append(f"     Preview: {preview}")
+
+    # ── Current user guidance ──
+    lines.append("\n## CURRENT GUIDANCE")
+    lines.append(f"User says: \"{feedback}\"")
+    lines.append("Please revise the SQL according to the guidance above. "
+                  "Previous corrections from PREVIOUS ATTEMPTS should be preserved.")
+
+    # ── Current SQL for reference ──
+    if sql:
+        lines.append(f"\n## CURRENT SQL (for reference)")
+        lines.append(sql[:600])
+
+    return "\n".join(lines)
+
+
 # ── Main node ─────────────────────────────────────────────────────────────────
 
 def refiner_node(state: AgentState) -> dict:
@@ -250,7 +300,12 @@ def refiner_node(state: AgentState) -> dict:
     exec_error = exec_result.get("error") if exec_result else None
     guard_issues = state.get("guard_issues", [])
 
-    if semantic_feedback and not exec_error:
+    # Feedback source priority: user > semantic > execution > guard > unknown
+    user_feedback = state.get("user_feedback", "")
+    if user_feedback:
+        turns = state.get("conversation_turns", [])
+        error_feedback = _format_user_feedback(user_feedback, sql, exec_result, turns)
+    elif semantic_feedback and not exec_error:
         error_feedback = _format_semantic_feedback(semantic_feedback, sql, exec_result)
     elif exec_error:
         error_feedback = _format_exec_feedback(exec_result, sql, schema_text)
@@ -302,7 +357,8 @@ def refiner_node(state: AgentState) -> dict:
 
     # Record repair history
     repair_history = list(state.get("repair_history", []))
-    error_source = "semantic" if (semantic_feedback and not exec_error) else \
+    error_source = "human" if user_feedback else \
+                   "semantic" if (semantic_feedback and not exec_error) else \
                    "execution" if exec_error else \
                    "guard" if guard_issues else "unknown"
     repair_history.append({

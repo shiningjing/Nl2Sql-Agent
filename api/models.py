@@ -184,3 +184,14 @@ class TaskStatusResponse(BaseModel):
 class TaskCancelResponse(BaseModel):
     task_id: str
     status: str  # "cancelled" | "not_found"
+
+
+class TaskFeedbackRequest(BaseModel):
+    feedback: str = Field(..., min_length=1, max_length=2000,
+                          description="User correction guidance, e.g. '需要加 GROUP BY'")
+
+
+class TaskFeedbackResponse(BaseModel):
+    task_id: str
+    status: str  # "accepted"
+    turn: int     # which conversation turn this is

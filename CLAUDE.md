@@ -365,12 +365,12 @@ Self-Correction 路径（retry_count > 0）:
 - `database/sql` — 数据库连接池
 
 **子任务**：
-- 2.1 初始化 `mcp-server/` Go module
+- 2.1 初始化 `mcp-server-go/` Go module
 - 2.2 `validate_sql` 工具 — AST 校验（语法/多语句/禁止类型），输出 `{valid, issues[], table_references}`
 - 2.3 `execute_readonly_sql` 工具 — 只读 SQL 执行（双重校验 + LIMIT 自动包装 + 超时 + 行数上限）
 - 2.4 安全硬限制：正则 + vitess AST 双重校验、连接级超时、max_rows 硬上限 1000
 - 2.5 测试：合法 SELECT / 多语句拒绝 / DROP 拒绝 / 语法错误 / LIMIT 包装
-- 2.6 Docker Compose 中加入 mcp-server 服务
+- 2.6 Docker Compose 中加入 mcp-server-go 服务
 
 ### 任务 3：Streamlit UI 优化 — ChatGPT 风格对话
 
@@ -488,7 +488,7 @@ nl2sql-mini-agent/
   data/bird/mini_dev_data/ # BIRD Mini-Dev 数据集
   llm_keys.json            # LLM 密钥（不提交 Git）
   databases.json           # 用户自定义数据库连接
-  mcp-server/              # Go MCP Server (validate_sql + execute_readonly_sql)
+  tools/mcp-server-go/     # Go MCP Server (validate_sql + execute_readonly_sql)
   gateway/                 # Go API Gateway (go-chi 限流/反向代理)
 ```
 

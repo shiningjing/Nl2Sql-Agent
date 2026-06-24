@@ -82,6 +82,11 @@ class AgentState(TypedDict):
     fewshot_enabled: NotRequired[bool]
     fewshot_hits: NotRequired[list[str]]
 
+    # ── W7: Human-Feedback Conversation ──
+    user_feedback: NotRequired[str]              # raw user guidance for this correction turn
+    conversation_turns: NotRequired[list[dict]]   # [{turn, user_feedback, sql, exec_result}]
+    is_feedback_round: NotRequired[bool]          # True = skip Router/Schema/Decomposer/Fewshot
+
     # ── W5: Trace ──
     tlog: NotRequired[object]  # TraceLogger instance (not serialized)
 
