@@ -400,31 +400,6 @@ def render_result(result: dict, question: str):
     node_timings = result.get("node_timings", {})
     rag_chunks = result.get("rag_chunks", [])
 
-    # Thinking-process expander (collapsed by default)
-    has_thinking = bool(node_timings) or bool(result.get("raw_response")) or bool(result.get("voter_candidates")) or bool(sql)
-    if has_thinking:
-        with st.expander("Thinking process", expanded=False):
-            if node_timings:
-                order = ["router", "schema_retriever", "decomposer", "fewshot_selector",
-                         "generator", "guard", "executor", "voter", "semantic_check", "refiner"]
-                flow_items = [f"{n} ({node_timings[n]:.1f}s)" for n in order if n in node_timings]
-                st.caption("Pipeline:  " + "  →  ".join(flow_items))
-            if sql:
-                st.divider()
-                st.caption("Generated SQL:")
-                st.code(sql, language="sql")
-            voters = result.get("voter_candidates", [])
-            if voters:
-                st.divider()
-                st.caption(f"Voter candidates ({len(voters)}):")
-                for c in voters:
-                    st.code(c.get("sql", ""), language="sql")
-            raw = result.get("raw_response", "")
-            if raw:
-                st.divider()
-                st.caption("LLM thinking:")
-                st.text(raw[:2000])
-
     tab1, tab2, tab3 = st.tabs(["SQL", "Results", "Trace"])
 
     with tab1:
