@@ -8,7 +8,7 @@ Natural language → SQL end-to-end system. LangGraph state machine orchestrates
 
 ## Architecture
 
-### System (Async Path)
+### System
 
 ```
   Client (Streamlit UI / API)
@@ -29,65 +29,24 @@ Natural language → SQL end-to-end system. LangGraph state machine orchestrates
         │  /query/full/stream: FastAPI runs LangGraph in-thread
         │  (sync path — no Kafka, no Worker)
         ▼
-  ┌─────────────────────────────────────────────────┐
-  │              LangGraph Agent                    │
-  │                                                 │
-  │  Router → Schema Retriever → Decomposer         │
-  │     → Generator → Guard → Voter → SemCheck       │
-  │     → Refiner (self-correction loop)            │
-  │                                                 │
-  │  Feedback Graph (human correction):             │
-  │     Refiner → Generator → Guard → Voter → SemCheck │
-  │                                                 │
-  │  Tools: MCP validate_sql · execute_readonly_sql  │
-  │         Python (fastmcp) + Go (mcp-go)          │
-  └──────────────────┬──────────────────────────────┘
-                     │
-         ┌───────────┼───────────┐
-         ▼           ▼           ▼
-    PostgreSQL   MySQL   SQLite (BIRD 11 DBs)
-         │           │           │
-         └───────────┼───────────┘
-                     ▼
-        ChromaDB (RAG embeddings)    Redis (state + tokens)
+  ┌──────────────────────────────────────────────────────┐
+  │  PostgreSQL · MySQL · SQLite (BIRD 11 DBs)           │
+  │  ChromaDB (RAG embeddings) · Redis (state + tokens)  │
+  └──────────────────────────────────────────────────────┘
 ```
 
-### Data Flow
+### LangGraph Agent
 
 ```
-  ┌──────────┐   submit/feedback   ┌────────┐   consume    ┌────────┐
-  │ FastAPI  │ ──────────────────→ │ Kafka  │ ──────────→ │ Worker │
-  │ (:8000)  │                     │ 3.7.1  │             │        │
-  └────┬─────┘                     └────────┘             └───┬────┘
-       │                                                      │
-       │  SSE: poll Redis state + Redis Pub/Sub tokens        │
-       │  ◄──────────────────────────────────────────────────┘
-       │                                                      │
-       ▼                                                      ▼
-  ┌─────────┐                                          ┌─────────┐
-  │ Client  │                                          │  Redis  │
-  │ (SSE)   │                                          │ state   │
-  └─────────┘                                          │ tokens  │
-                                                       └─────────┘
-```
+  Router → Schema Retriever → Decomposer
+     → Generator → Guard → Voter → SemCheck
+     → Refiner (self-correction loop)
 
-### Self-Correction & Human Feedback
+  Human Feedback Graph:
+     Refiner → Generator → Guard → Voter → SemCheck
 
-```
-  Generator → Guard → Voter → SemCheck
-      │          │        │         │
-      │    fail  │  fail  │  fail   │
-      └──────────┴────────┴─────────┘
-                      │
-                      ▼
-                 Refiner
-                      │
-                      ├── Auto: formats Guard/Voter/SemCheck errors
-                      ├── Human: formats user_feedback + conversation history
-                      │
-                      ▼
-                 Generator (retry or feedback graph)
-```
+  Tools: MCP validate_sql · execute_readonly_sql
+         Python (fastmcp) + Go (mcp-go)
 
 ## Quick Start
 
