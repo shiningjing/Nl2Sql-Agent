@@ -1,0 +1,39 @@
+﻿question_id,db_id,difficulty,knowledge_source,ex,ves,detail,gen_sql,gold_sql,prompt_tokens,completion_tokens,total_tokens,elapsed_s,elapsed_graph_s,elapsed_execmatch_s,guard_pass,guard_issue_count,ast_pass,semantic_pass,sem_reject_count,retry_count,candidate_count,decomposer_used,sub_question_count,rag_recall,trace_id,last_graph_node
+1044,european_football_2,simple,evidence,True,1.3638,match (4 rows),"SELECT player_name
+FROM Player
+WHERE SUBSTR(birthday, 1, 7) = '1970-10'
+LIMIT 200;","SELECT player_name FROM Player WHERE SUBSTR(birthday, 1, 7) = '1970-10'",9429,36,9465,5.36,5.357,0.0057,True,0,True,True,0,0,0,False,0,1.0,f6d6ddded310,semantic_check
+1389,student_club,simple,evidence,False,0.0,"mismatch: gold=1 rows, gen=1 rows","-- Step 1: Calculate total cost per event by summing expenses linked through budget
+-- Step 2: Order by total cost ascending and pick the lowest
+SELECT e.event_name, SUM(exp.cost) AS total_cost
+FROM event e
+JOIN budget b ON b.link_to_event = e.event_id
+JOIN expense exp ON exp.link_to_budget = b.budg",SELECT T1.event_name FROM event AS T1 INNER JOIN budget AS T2 ON T1.event_id = T2.link_to_event INNER JOIN expense AS T3 ON T2.budget_id = T3.link_to_budget ORDER BY T3.cost LIMIT 1,26340,648,26988,19.46,19.462,0.0026,True,0,True,True,0,2,3,False,0,1.0,0c1fc67145f0,semantic_check
+1493,debit_card_specializing,simple,evidence,False,0.0,"mismatch: gold=1 rows, gen=1 rows","WITH total_customers AS (
+  SELECT COUNT(DISTINCT CustomerID) AS total
+  FROM yearmonth
+  WHERE Date = '201202'
+),
+high_consumers AS (
+  SELECT COUNT(DISTINCT CustomerID) AS high
+  FROM yearmonth
+  WHERE Date = '201202' AND Consumption > 528.3
+)
+SELECT ROUND(high * 100.0 / total, 2) AS percentage
+FR","SELECT CAST(SUM(IIF(Consumption > 528.3, 1, 0)) AS FLOAT) * 100 / COUNT(CustomerID) FROM yearmonth WHERE Date = '201202'",2061,162,2223,6.32,6.287,0.0366,True,0,True,True,0,0,0,True,0,1.0,c729fcf4f4af,semantic_check
+465,card_games,moderate,evidence,False,0.0,"mismatch: gold=1 rows, gen=1 rows","SELECT COUNT(*) > 0 AS has_korean_version
+FROM foreign_data
+WHERE uuid = (SELECT uuid FROM cards WHERE name = 'Ancestor''s Chosen' LIMIT 1)
+  AND language = 'Korean'
+LIMIT 200;","SELECT IIF(SUM(CASE WHEN T2.language = 'Korean' AND T2.translation IS NOT NULL THEN 1 ELSE 0 END) > 0, 'YES', 'NO') FROM cards AS T1 INNER JOIN set_translations AS T2 ON T2.setCode = T1.setCode WHERE T1.name = 'Ancestor''s Chosen'",38565,285,38850,13.97,13.813,0.1539,True,0,True,True,2,2,1,False,0,1.0,88a67ba72250,semantic_check
+637,codebase_community,moderate,evidence,False,0.0,"mismatch: gold=5 rows, gen=1 rows","WITH mark_meckes_posts AS (
+    SELECT p.Id, p.Tags
+    FROM posts p
+    JOIN users u ON p.OwnerUserId = u.Id
+    WHERE u.DisplayName = 'Mark Meckes'
+      AND p.CommentCount = 0
+      AND p.Tags IS NOT NULL
+),
+split_tags AS (
+    SELECT DISTINCT TRIM(t.value, '<>') AS tag
+    FROM mark_meckes_posts",SELECT T3.Tags FROM users AS T1 INNER JOIN postHistory AS T2 ON T1.Id = T2.UserId INNER JOIN posts AS T3 ON T3.Id = T2.PostId WHERE T1.DisplayName = 'Mark Meckes' AND T3.CommentCount = 0,30262,1188,31450,37.69,37.445,0.2418,True,0,True,False,1,3,1,False,0,1.0,6f3c66fa2395,refiner

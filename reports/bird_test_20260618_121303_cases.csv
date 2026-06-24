@@ -1,0 +1,621 @@
+﻿question_id,db_id,difficulty,knowledge_source,ex,ves,detail,gen_sql,gold_sql,prompt_tokens,completion_tokens,total_tokens,elapsed_s,elapsed_graph_s,elapsed_execmatch_s,guard_pass,guard_issue_count,ast_pass,semantic_pass,sem_reject_count,retry_count,candidate_count,decomposer_used,sub_question_count,rag_recall,trace_id,last_graph_node
+1036,european_football_2,challenging,rag,True,3.0792,match (128 rows),"-- Step 1: Identify the core entities and tables needed
+-- We need Team (for team_long_name) and Team_Attributes (for buildUpPlayPassing and date filtering)
+
+-- Step 2: Determine JOIN conditions
+-- Team_Attributes.team_api_id = Team.team_api_id
+
+-- Step 3: Apply filters
+-- Date must be in 2012 (year","SELECT DISTINCT t4.team_long_name FROM Team_Attributes AS t3 INNER JOIN Team AS t4 ON t3.team_api_id = t4.team_api_id WHERE SUBSTR(t3.`date`, 1, 4) = '2012' AND t3.buildUpPlayPassing > ( SELECT CAST(SUM(t2.buildUpPlayPassing) AS REAL) / COUNT(t1.id) FROM Team AS t1 INNER JOIN Team_Attributes AS t2 O",11923,248,12171,4.35,4.348,0.0067,True,0,True,True,0,0,0,False,0,1.0,f62126b10d7e,semantic_check
+1037,european_football_2,challenging,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","-- Step 1: Count total players born between 1987 and 1992
+-- Step 2: Count those among them who prefer left foot
+-- Step 3: Compute percentage
+WITH total_players AS (
+    SELECT COUNT(*) AS total
+    FROM Player
+    WHERE SUBSTR(birthday, 1, 4) BETWEEN '1987' AND '1992'
+),
+left_foot_players AS (
+   ","SELECT CAST(COUNT(CASE WHEN t2.preferred_foot = 'left' THEN t1.id ELSE NULL END) AS REAL) * 100 / COUNT(t1.id) percent FROM Player AS t1 INNER JOIN Player_Attributes AS t2 ON t1.player_api_id = t2.player_api_id WHERE SUBSTR(t1.birthday, 1, 4) BETWEEN '1987' AND '1992'",12032,216,12248,5.52,5.371,0.1485,True,0,True,True,0,0,0,False,0,1.0,0f732653570b,semantic_check
+1044,european_football_2,simple,rag,True,1.0889,match (4 rows),"SELECT player_name FROM Player WHERE SUBSTR(birthday, 1, 7) = '1970-10'","SELECT player_name FROM Player WHERE SUBSTR(birthday, 1, 7) = '1970-10'",12381,29,12410,2.8,2.79,0.0089,True,0,True,True,0,0,0,False,0,1.0,280a938e7456,semantic_check
+1057,european_football_2,moderate,rag,True,1.18,match (1 rows),"SELECT AVG(m.home_team_goal) AS avg_home_team_goal
+FROM Match m
+JOIN Country c ON m.country_id = c.id
+WHERE c.name = 'Poland'
+  AND m.season = '2010/2011';",SELECT CAST(SUM(t2.home_team_goal) AS REAL) / COUNT(t2.id) FROM Country AS t1 INNER JOIN Match AS t2 ON t1.id = t2.country_id WHERE t1.name = 'Poland' AND t2.season = '2010/2011',31481,188,31669,12.87,12.799,0.0679,True,0,True,True,0,1,1,False,0,1.0,2be496ec1e71,semantic_check
+1080,european_football_2,moderate,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","SELECT COUNT(DISTINCT pa.player_api_id) AS left_foot_defensive_players
+FROM Player_Attributes pa
+WHERE pa.preferred_foot = 'left'
+  AND pa.defensive_work_rate = 'high'
+LIMIT 200;",SELECT COUNT(player_api_id) FROM Player_Attributes WHERE preferred_foot = 'left' AND attacking_work_rate = 'low',51136,345,51481,13.71,13.607,0.1012,True,0,True,False,2,3,1,True,0,1.0,6df9c09afba3,refiner
+1088,european_football_2,moderate,rag,False,0.0,"mismatch: gold=1000 rows, gen=200 rows","SELECT DISTINCT p.player_name
+FROM Player p
+JOIN Player_Attributes pa ON p.player_api_id = pa.player_api_id
+WHERE pa.volleys > 70 AND pa.dribbling > 70
+LIMIT 200;",SELECT DISTINCT t1.player_name FROM Player AS t1 INNER JOIN Player_Attributes AS t2 ON t1.player_api_id = t2.player_api_id WHERE t2.volleys > 70 AND t2.dribbling > 70,31514,160,31674,6.4,6.378,0.0208,True,0,True,True,0,1,1,False,0,1.0,19868b3cdbdf,semantic_check
+1139,european_football_2,challenging,rag,True,1.4716,match (1 rows),"SELECT home_team_goal, away_team_goal
+FROM Match
+JOIN League ON Match.league_id = League.id
+WHERE League.name = 'Belgium Jupiler League'
+  AND date(Match.date) = '2008-09-24'
+LIMIT 200;","SELECT t2.home_team_goal, t2.away_team_goal FROM League AS t1 INNER JOIN Match AS t2 ON t1.id = t2.league_id WHERE t1.name = 'Belgium Jupiler League' AND t2.`date` LIKE '2008-09-24%'",13235,66,13301,4.0,3.933,0.0699,True,0,True,True,0,0,0,False,0,1.0,6dbc43f9ffea,semantic_check
+1144,european_football_2,simple,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","-- Step 1: Find the maximum weight from Player table
+-- Step 2: Get the player(s) with that weight
+-- Step 3: Join with Player_Attributes to get finishing and curve
+-- Step 4: Use ORDER BY date DESC and LIMIT 1 to get the most recent attribute record per player
+SELECT p.player_name, pa.finishing AS ","SELECT id, finishing, curve FROM Player_Attributes WHERE player_api_id = ( SELECT player_api_id FROM Player ORDER BY weight DESC LIMIT 1 ) LIMIT 1",60856,821,61677,18.96,18.736,0.2258,True,0,True,False,1,3,1,False,0,1.0,b0c041d808fb,refiner
+1146,european_football_2,moderate,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","SELECT t.team_long_name AS away_team_name
+FROM Match m
+JOIN Team t ON m.away_team_api_id = t.team_api_id
+GROUP BY m.away_team_api_id
+ORDER BY SUM(m.away_team_goal) DESC
+LIMIT 1;",SELECT t2.team_long_name FROM Match AS t1 INNER JOIN Team AS t2 ON t1.away_team_api_id = t2.team_api_id ORDER BY t1.away_team_goal DESC LIMIT 1,12285,67,12352,4.75,4.618,0.1306,True,0,True,True,0,0,0,False,0,1.0,57398530836c,semantic_check
+1150,thrombosis_prediction,moderate,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","SELECT 
+    ROUND(100.0 * SUM(CASE WHEN Birthday > '1930-12-31' AND SEX = 'F' THEN 1 ELSE 0 END) / COUNT(*), 2) AS percentage_female_born_after_1930
+FROM Patient
+LIMIT 200;","SELECT CAST(SUM(CASE WHEN STRFTIME('%Y', Birthday) > '1930' THEN 1 ELSE 0 END) AS REAL) * 100 / COUNT(*) FROM Patient WHERE SEX = 'F'",19652,351,20003,12.99,12.98,0.007,True,0,True,False,1,3,1,False,0,1.0,85aaac7ff871,refiner
+1153,thrombosis_prediction,simple,rag,True,6.4692,match (60 rows),"SELECT P.Diagnosis, L.Date
+FROM Patient AS P
+INNER JOIN Laboratory AS L ON P.ID = L.ID
+WHERE P.ID = 30609
+LIMIT 200;","SELECT T1.Diagnosis, T2.Date FROM Patient AS T1 INNER JOIN Laboratory AS T2 ON T1.ID = T2.ID WHERE T1.ID = 30609",12014,132,12146,5.51,5.512,0.0021,True,0,True,True,0,1,1,False,0,1.0,1f4781442ed6,semantic_check
+1156,thrombosis_prediction,moderate,rag,False,0.0,"mismatch: gold=7 rows, gen=4 rows","SELECT DISTINCT e.ID, 
+       CAST((julianday(e.""Examination Date"") - julianday(p.Birthday)) / 365.25 AS INTEGER) AS age
+FROM Examination e
+JOIN Patient p ON e.ID = p.ID
+WHERE e.LAC = '+'
+  AND e.KCT = '+'
+  AND e.RVVT = '+'
+LIMIT 200;","SELECT DISTINCT T1.ID, STRFTIME('%Y', CURRENT_TIMESTAMP) - STRFTIME('%Y', T1.Birthday) FROM Patient AS T1 INNER JOIN Examination AS T2 ON T1.ID = T2.ID WHERE T2.RVVT = '+'",19637,440,20077,12.42,12.411,0.0046,True,0,True,False,1,3,1,False,0,1.0,106fe4308937,refiner
+116,financial,challenging,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","-- Step 1: Find the account_id of the client whose loan was approved first on 1993/7/5
+WITH step1 AS (
+    SELECT l.account_id
+    FROM loan l
+    WHERE l.date = '1993-07-05'
+    ORDER BY l.loan_id ASC
+    LIMIT 1
+),
+-- Step 2: Find the account balance of that client on 1993/3/22 using the last tran","SELECT CAST((SUM(IIF(T3.date = '1998-12-27', T3.balance, 0)) - SUM(IIF(T3.date = '1993-03-22', T3.balance, 0))) AS REAL) * 100 / SUM(IIF(T3.date = '1993-03-22', T3.balance, 0)) FROM loan AS T1 INNER JOIN account AS T2 ON T1.account_id = T2.account_id INNER JOIN trans AS T3 ON T3.account_id = T2.acco",27369,2846,30215,33.8,33.456,0.3484,True,0,True,False,1,3,3,True,4,1.0,604875815c9e,refiner
+118,financial,moderate,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","WITH 
+step1 AS (
+    SELECT COUNT(DISTINCT account_id) AS total_accounts
+    FROM loan
+    WHERE amount < 100000
+),
+step2 AS (
+    SELECT COUNT(DISTINCT account_id) AS running_accounts
+    FROM loan
+    WHERE amount < 100000 AND status = 'A'
+)
+SELECT 
+    ROUND(CAST(step2.running_accounts AS REAL) *",SELECT CAST(SUM(status = 'C') AS REAL) * 100 / COUNT(account_id) FROM loan WHERE amount < 100000,4379,251,4630,5.18,5.178,0.0043,True,0,True,True,0,0,0,True,3,1.0,b6045d33a30c,semantic_check
+1198,thrombosis_prediction,simple,rag,True,0.6246,match (1 rows),"SELECT COUNT(*) AS female_aps_patients
+FROM Patient
+WHERE SEX = 'F' AND Diagnosis = 'APS'
+LIMIT 200;",SELECT COUNT(ID) FROM Patient WHERE SEX = 'F' AND Diagnosis = 'APS',4582,36,4618,2.11,2.109,0.0025,True,0,True,True,0,0,0,False,0,1.0,0182f73fc819,semantic_check
+1208,thrombosis_prediction,moderate,rag,True,0.7011,match (24 rows),"-- Step 1: Identify male patients
+-- Step 2: Identify patients with at least one GPT > 60 record (history of exceedance)
+-- Step 3: Intersect the two sets
+WITH 
+male_patients AS (
+    SELECT ID FROM Patient WHERE SEX = 'M'
+),
+gpt_exceedance AS (
+    SELECT DISTINCT ID FROM Laboratory WHERE GPT > 60
+",SELECT DISTINCT T1.ID FROM Patient AS T1 INNER JOIN Laboratory AS T2 ON T1.ID = T2.ID WHERE T1.SEX = 'M' AND T2.GPT >= 60,28119,992,29111,17.37,17.367,0.0068,True,0,True,True,0,2,3,True,4,1.0,ce8fb1cf1874,semantic_check
+1231,thrombosis_prediction,challenging,rag,True,0.6277,match (1 rows),"-- Step 1: Identify core entities and tables needed
+-- Patient table for birth year and sex, Laboratory table for CPK values
+-- Step 2: Determine JOIN conditions
+-- JOIN Patient and Laboratory on Patient.ID = Laboratory.ID
+-- Step 3: Apply filters
+-- Birth year between 1936 and 1956 (inclusive), mal","SELECT COUNT(DISTINCT T1.ID) FROM Patient AS T1 INNER JOIN Laboratory AS T2 ON T1.ID = T2.ID WHERE STRFTIME('%Y', T1.Birthday) BETWEEN '1936' AND '1956' AND T1.SEX = 'M' AND T2.CPK >= 250",21387,1090,22477,18.77,18.769,0.0042,True,0,True,False,1,3,1,True,0,1.0,e0f82a09a66a,refiner
+1238,thrombosis_prediction,moderate,rag,True,0.7862,match (1 rows),"SELECT P.ID, P.SEX
+FROM Patient P
+JOIN Laboratory L ON P.ID = L.ID
+WHERE P.Diagnosis = 'SLE'
+  AND L.HGB > 10 AND L.HGB < 17
+ORDER BY P.Birthday ASC
+LIMIT 1;","SELECT T1.ID, T1.SEX FROM Patient AS T1 INNER JOIN Laboratory AS T2 ON T1.ID = T2.ID WHERE T1.Diagnosis = 'SLE' AND T2.HGB > 10 AND T2.HGB < 17 ORDER BY T1.Birthday ASC LIMIT 1",12024,347,12371,9.6,9.596,0.0042,True,0,True,True,0,1,1,True,0,1.0,1ee97f1c9ec0,semantic_check
+1239,thrombosis_prediction,challenging,rag,False,0.0,"mismatch: gold=3 rows, gen=18 rows","-- Step 1: Find patient IDs with at least two lab records where hematocrit exceeded the normal range (sex-dependent)
+-- Normal range: HCT > 52 for males, HCT > 47 for females (based on common clinical ranges)
+-- Step 2: For those patients, compute age from birthday to description date
+WITH step1 AS ","SELECT DISTINCT T1.ID, STRFTIME('%Y', CURRENT_TIMESTAMP) - STRFTIME('%Y', T1.Birthday) FROM Patient AS T1 INNER JOIN Laboratory AS T2 ON T1.ID = T2.ID WHERE T1.ID IN ( SELECT ID FROM Laboratory WHERE HCT >= 52 GROUP BY ID HAVING COUNT(ID) >= 2 )",28815,1302,30117,21.6,21.586,0.0194,True,0,True,False,1,3,3,True,2,1.0,95288741bd45,refiner
+1241,thrombosis_prediction,challenging,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","-- Step 1: Identify patients with abnormal platelet levels (PLT < 100 or PLT > 400)
+-- Step 2: Count distinct patients in each category (low vs high)
+-- Step 3: Compare the two counts
+WITH abnormal_platelet AS (
+  SELECT DISTINCT ID,
+         CASE WHEN PLT < 100 THEN 'low' WHEN PLT > 400 THEN 'high'",SELECT SUM(CASE WHEN T2.PLT <= 100 THEN 1 ELSE 0 END) - SUM(CASE WHEN T2.PLT >= 400 THEN 1 ELSE 0 END) FROM Patient AS T1 INNER JOIN Laboratory AS T2 ON T1.ID = T2.ID,16561,1095,17656,14.68,14.67,0.0107,True,0,True,True,0,1,2,True,0,1.0,25745e428ac3,semantic_check
+1243,thrombosis_prediction,challenging,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","-- Step 1: Find the IDs of patients older than 55 years old
+WITH older_patients AS (
+    SELECT ID, SEX
+    FROM Patient
+    WHERE (julianday('now') - julianday(Birthday)) / 365.25 > 55
+),
+-- Step 2: Among those patients, find the count of female patients with abnormal PT (PT >= 14)
+abnormal_pt_fema","SELECT CAST(SUM(CASE WHEN T2.PT >= 14 AND T1.SEX = 'F' THEN 1 ELSE 0 END) AS REAL) * 100 / COUNT(CASE WHEN T2.PT >= 14 THEN 1 ELSE 0 END) FROM Patient AS T1 INNER JOIN Laboratory AS T2 ON T1.ID = T2.ID WHERE STRFTIME('%Y', CURRENT_TIMESTAMP) - STRFTIME('%Y', T1.Birthday) > 55",25719,1737,27456,20.82,20.814,0.0108,True,0,True,True,2,2,1,True,4,1.0,631369a18c29,semantic_check
+1251,thrombosis_prediction,simple,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","SELECT COUNT(DISTINCT p.ID) AS patient_count
+FROM Patient p
+JOIN Laboratory l ON p.ID = l.ID
+WHERE l.IGG > 2000
+LIMIT 200;",SELECT COUNT(DISTINCT T1.ID) FROM Patient AS T1 INNER JOIN Laboratory AS T2 ON T1.ID = T2.ID INNER JOIN Examination AS T3 ON T3.ID = T2.ID WHERE T2.IGG >= 2000,19206,231,19437,9.91,9.903,0.0059,True,0,True,True,2,2,1,False,0,1.0,a07bb5edefb6,semantic_check
+1255,thrombosis_prediction,moderate,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","-- Step 1: Identify patients with abnormal Ig M level (IgM < 40 or IgM > 400)
+-- Step 2: Join with Patient to get Diagnosis
+-- Step 3: Count diagnoses and find the most common one
+SELECT p.Diagnosis AS disease, COUNT(*) AS count
+FROM Laboratory l
+JOIN Patient p ON l.ID = p.ID
+WHERE l.IGM < 40 OR l.I",SELECT T1.Diagnosis FROM Patient AS T1 INNER JOIN Laboratory AS T2 ON T1.ID = T2.ID WHERE T2.IGM NOT BETWEEN 40 AND 400 GROUP BY T1.Diagnosis ORDER BY COUNT(T1.Diagnosis) DESC LIMIT 1,4593,116,4709,3.43,3.355,0.0712,True,0,True,True,0,0,0,False,0,1.0,9af51578d8ba,semantic_check
+1275,thrombosis_prediction,moderate,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","SELECT COUNT(DISTINCT p.ID) AS male_count
+FROM Patient p
+JOIN Laboratory l ON p.ID = l.ID
+WHERE p.SEX = 'M'
+  AND l.CENTROMEA = '-'
+  AND l.SSB = '-'
+LIMIT 200;","SELECT COUNT(DISTINCT T1.ID) FROM Patient AS T1 INNER JOIN Laboratory AS T2 ON T1.ID = T2.ID WHERE T2.CENTROMEA IN ('negative', '0') AND T2.SSB IN ('negative', '0') AND T1.SEX = 'M'",19770,327,20097,13.11,13.111,0.0031,True,0,True,False,2,3,1,False,0,1.0,272375ef03f9,refiner
+129,financial,moderate,rag,False,0.0,"mismatch: gold=10 rows, gen=10 rows","-- Step 1: Identify core entities: trans (withdrawals), account (for district_id), district (for names)
+-- Step 2: Filter for January 1996, withdrawals (type = 'VYDAJ'), and non-credit card operations (operation != 'VYBER KARTOU')
+-- Step 3: Join trans -> account -> district
+-- Step 4: Group by dist",SELECT DISTINCT T1.A2 FROM district AS T1 INNER JOIN account AS T2 ON T1.district_id = T2.district_id INNER JOIN trans AS T3 ON T2.account_id = T3.account_id WHERE T3.type = 'VYDAJ' AND T3.date LIKE '1996-01%' ORDER BY A2 ASC LIMIT 10,2645,226,2871,10.38,9.698,0.6839,True,0,True,True,0,0,0,False,0,1.0,feb0105929ab,semantic_check
+1334,student_club,simple,rag,False,0.0,"mismatch: gold=3 rows, gen=3 rows","SELECT m.first_name || ' ' || m.last_name AS full_name
+FROM member m
+JOIN zip_code z ON m.zip = z.zip_code
+WHERE z.short_state = 'IL'
+LIMIT 200;","SELECT T1.first_name, T1.last_name FROM member AS T1 INNER JOIN zip_code AS T2 ON T1.zip = T2.zip_code WHERE T2.state = 'Illinois'",13082,147,13229,8.53,8.528,0.0019,True,0,True,True,0,1,1,False,0,1.0,b9299687c80d,semantic_check
+1338,student_club,moderate,rag,False,0.0,"mismatch: gold=3 rows, gen=2 rows","SELECT e.expense_description, e.cost, e.approved
+FROM expense e
+JOIN budget b ON e.link_to_budget = b.budget_id
+JOIN event ev ON b.link_to_event = ev.event_id
+WHERE ev.event_name = 'October Meeting'
+  AND e.expense_date = '2019-10-08'
+LIMIT 200;",SELECT T3.approved FROM event AS T1 INNER JOIN budget AS T2 ON T1.event_id = T2.link_to_event INNER JOIN expense AS T3 ON T2.budget_id = T3.link_to_budget WHERE T1.event_name = 'October Meeting' AND T1.event_date LIKE '2019-10-08%',4173,82,4255,3.08,3.073,0.0033,True,0,True,True,0,0,0,False,0,1.0,19fbac1bbaab,semantic_check
+1346,student_club,simple,rag,True,0.6776,match (1 rows),"SELECT phone
+FROM member
+WHERE first_name = 'Carlo' AND last_name = 'Jacobs'
+LIMIT 200;",SELECT phone FROM member WHERE first_name = 'Carlo' AND last_name = 'Jacobs',5093,31,5124,2.65,2.647,0.0014,True,0,True,True,0,0,0,False,0,1.0,b2ff17a71240,semantic_check
+1356,student_club,simple,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","SELECT m.position, m.first_name, m.last_name, maj.department
+FROM member m
+JOIN major maj ON m.link_to_major = maj.major_id
+WHERE m.position = 'President'
+LIMIT 200;",SELECT T2.department FROM member AS T1 INNER JOIN major AS T2 ON T1.link_to_major = T2.major_id WHERE T1.position = 'President',5093,52,5145,3.84,3.842,0.0022,True,0,True,True,0,0,0,False,0,1.0,30e41aa10794,semantic_check
+136,financial,moderate,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","SELECT COUNT(DISTINCT l.account_id) AS approved_loans_count
+FROM loan l
+JOIN account a ON l.account_id = a.account_id
+WHERE l.date BETWEEN '1995-01-01' AND '1997-12-31'
+  AND l.amount >= 250000
+  AND a.frequency = 'POPLATEK MESICNE'
+  AND l.status IN ('A', 'C')
+LIMIT 200;",SELECT COUNT(T1.account_id) FROM account AS T1 INNER JOIN loan AS T2 ON T1.account_id = T2.account_id WHERE T2.date BETWEEN '1995-01-01' AND '1997-12-31' AND T1.frequency = 'POPLATEK MESICNE' AND T2.amount >= 250000,4314,172,4486,4.29,4.286,0.0043,True,0,True,True,0,0,0,True,0,1.0,efec57e3c294,semantic_check
+1361,student_club,simple,rag,True,0.5135,match (1 rows),"-- Step 1: Identify pizza expenses linked to events via budget
+-- Step 2: Join expense -> budget -> event to ensure pizza expenses are for events
+-- Step 3: Filter for pizza-related expenses and sum the cost
+SELECT SUM(e.cost) AS total_pizza_cost
+FROM expense e
+JOIN budget b ON e.link_to_budget = b.",SELECT SUM(cost) FROM expense WHERE expense_description = 'Pizza',15921,406,16327,9.57,9.564,0.0021,True,0,True,True,0,1,3,False,0,1.0,758954df800e,semantic_check
+1368,student_club,simple,rag,True,0.417,match (1 rows),"SELECT m.major_name AS major
+FROM member
+JOIN major m ON member.link_to_major = m.major_id
+WHERE member.phone = '809-555-3360'
+LIMIT 200;",SELECT T2.major_name FROM member AS T1 INNER JOIN major AS T2 ON T1.link_to_major = T2.major_id WHERE T1.phone = '809-555-3360',5106,49,5155,2.59,2.587,0.0019,True,0,True,True,0,0,0,False,0,1.0,197131680885,semantic_check
+1375,student_club,moderate,rag,False,0.0,"mismatch: gold=5 rows, gen=5 rows","SELECT m.first_name, m.last_name, m.email, m.position, m.t_shirt_size, m.phone, m.zip
+FROM member m
+JOIN major ma ON m.link_to_major = ma.major_id
+WHERE ma.department = 'School of Applied Sciences, Technology and Education'
+LIMIT 200;","SELECT T1.first_name, T1.last_name FROM member AS T1 INNER JOIN major AS T2 ON T1.link_to_major = T2.major_id WHERE T2.department = 'School of Applied Sciences, Technology and Education'",4422,72,4494,2.95,2.95,0.0023,True,0,True,True,0,0,0,False,0,1.0,e01174233e98,semantic_check
+1376,student_club,moderate,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","-- Step 1: Identify closed events and their budgets
+-- Step 2: Calculate spend-to-budget ratio (spent / amount) for each event
+-- Step 3: Find the event with the highest ratio
+WITH event_budget AS (
+  SELECT 
+    e.event_id,
+    e.event_name,
+    SUM(b.spent) AS total_spent,
+    SUM(b.amount) AS tot",SELECT T2.event_name FROM budget AS T1 INNER JOIN event AS T2 ON T1.link_to_event = T2.event_id WHERE T2.status = 'Closed' ORDER BY T1.spent / T1.amount DESC LIMIT 1,4268,242,4510,4.61,4.604,0.0046,True,0,True,True,0,0,0,True,0,1.0,6ec7948c168a,semantic_check
+1389,student_club,simple,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","-- Step 1: Total cost for an event is the sum of all expenses linked to that event.
+-- Expenses are linked to events via budget: expense.link_to_budget -> budget.budget_id, budget.link_to_event -> event.event_id.
+-- Step 2: Join expense -> budget -> event, sum cost per event, order ascending, limit ",SELECT T1.event_name FROM event AS T1 INNER JOIN budget AS T2 ON T1.event_id = T2.link_to_event INNER JOIN expense AS T3 ON T2.budget_id = T3.link_to_budget ORDER BY T3.cost LIMIT 1,27986,1104,29090,25.82,25.822,0.0025,True,0,True,True,0,2,3,False,0,1.0,9e7ab6e01c55,semantic_check
+1401,student_club,moderate,rag,True,0.4239,match (1 rows),"SELECT e.cost AS poster_cost
+FROM expense e
+JOIN budget b ON e.link_to_budget = b.budget_id
+JOIN event ev ON b.link_to_event = ev.event_id
+WHERE e.expense_description LIKE '%Posters%'
+  AND ev.event_name = 'September Speaker'
+LIMIT 200;",SELECT T3.cost FROM event AS T1 INNER JOIN budget AS T2 ON T1.event_id = T2.link_to_event INNER JOIN expense AS T3 ON T2.budget_id = T3.link_to_budget WHERE T1.event_name = 'September Speaker' AND T3.expense_description = 'Posters',4203,72,4275,3.38,3.383,0.0023,True,0,True,True,0,0,0,False,0,1.0,d9d9d9c7e7cf,semantic_check
+1426,student_club,moderate,rag,True,0.5683,match (2 rows),"SELECT m.last_name, ma.department, ma.college
+FROM member m
+JOIN major ma ON m.link_to_major = ma.major_id
+WHERE ma.major_name = 'Environmental Engineering'
+LIMIT 200;","SELECT T2.last_name, T1.department, T1.college FROM major AS T1 INNER JOIN member AS T2 ON T1.major_id = T2.link_to_major WHERE T2.position = 'Member' AND T1.major_name = 'Environmental Engineering'",4458,52,4510,2.92,2.919,0.0018,True,0,True,True,0,0,0,False,0,1.0,7ed85ceeb9ca,semantic_check
+1476,debit_card_specializing,challenging,rag,True,2.0719,match (1 rows),"-- Step 1: Identify core entities: customers (currency), yearmonth (consumption by month)
+-- Step 2: Join customers with yearmonth on CustomerID
+-- Step 3: Filter for year 2012 (Date LIKE '2012%')
+-- Step 4: Group by currency and sum consumption, then compute difference
+WITH currency_consumption AS ","SELECT SUM(IIF(T1.Currency = 'CZK', T2.Consumption, 0)) - SUM(IIF(T1.Currency = 'EUR', T2.Consumption, 0)) FROM customers AS T1 INNER JOIN yearmonth AS T2 ON T1.CustomerID = T2.CustomerID WHERE SUBSTR(T2.Date, 1, 4) = '2012'",1521,213,1734,4.41,4.219,0.1872,True,0,True,True,0,0,0,False,0,1.0,e10ff737bd3e,semantic_check
+149,financial,challenging,rag,False,0.0,"mismatch: gold=461 rows, gen=0 rows","WITH
+step1 AS (
+  SELECT DISTINCT d.type AS account_type
+  FROM disp d
+  WHERE d.account_id NOT IN (
+    SELECT l.account_id FROM loan l
+  )
+),
+step2 AS (
+  SELECT district_id
+  FROM district
+  WHERE A10 > 8000 AND A10 <= 9000
+),
+step3 AS (
+  SELECT DISTINCT d.type AS account_type
+  FROM disp d
+  IN",SELECT T3.type FROM district AS T1 INNER JOIN account AS T2 ON T1.district_id = T2.district_id INNER JOIN disp AS T3 ON T2.account_id = T3.account_id WHERE T3.type != 'OWNER' AND T1.A11 BETWEEN 8000 AND 9000,22403,1049,23452,20.97,20.968,0.0044,True,0,True,False,1,3,3,True,3,1.0,44793640e07b,refiner
+1493,debit_card_specializing,simple,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","WITH
+step1 AS (
+  SELECT COUNT(DISTINCT CustomerID) AS total_customers
+  FROM yearmonth
+  WHERE Date = '201202'
+),
+step2 AS (
+  SELECT COUNT(DISTINCT CustomerID) AS high_consumers
+  FROM yearmonth
+  WHERE Date = '201202' AND Consumption > 528.3
+)
+SELECT
+  ROUND(CAST(step2.high_consumers AS REAL) / s","SELECT CAST(SUM(IIF(Consumption > 528.3, 1, 0)) AS FLOAT) * 100 / COUNT(CustomerID) FROM yearmonth WHERE Date = '201202'",2237,259,2496,11.53,11.504,0.0285,True,0,True,True,0,0,0,True,3,1.0,d36459f28aa4,semantic_check
+1498,debit_card_specializing,simple,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","SELECT MAX(Consumption) AS highest_monthly_consumption
+FROM yearmonth
+WHERE Date LIKE '2012%'
+LIMIT 200;","SELECT SUM(Consumption) FROM yearmonth WHERE SUBSTR(Date, 1, 4) = '2012' GROUP BY SUBSTR(Date, 5, 2) ORDER BY SUM(Consumption) DESC LIMIT 1",1727,36,1763,3.06,2.98,0.0843,True,0,True,True,0,0,0,False,0,1.0,56f180790c24,semantic_check
+1501,debit_card_specializing,moderate,rag,False,0.0,"mismatch: gold=2 rows, gen=0 rows","SELECT DISTINCT g.Country
+FROM gasstations g
+JOIN transactions_1k t ON g.GasStationID = t.GasStationID
+WHERE t.Date >= '2013-06-01' AND t.Date < '2013-07-01'
+LIMIT 200;",SELECT DISTINCT T2.Country FROM transactions_1k AS T1 INNER JOIN gasstations AS T2 ON T1.GasStationID = T2.GasStationID INNER JOIN yearmonth AS T3 ON T1.CustomerID = T3.CustomerID WHERE T3.Date = '201306',10567,352,10919,12.54,12.539,0.0023,True,0,True,False,1,3,1,False,0,1.0,0ac72b4c7e5f,refiner
+1505,debit_card_specializing,simple,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","SELECT COUNT(DISTINCT c.CustomerID) AS customer_count
+FROM customers c
+JOIN yearmonth ym ON c.CustomerID = ym.CustomerID
+WHERE c.Currency = 'EUR'
+  AND ym.Consumption > 1000
+LIMIT 200;",SELECT COUNT(*) FROM yearmonth AS T1 INNER JOIN customers AS T2 ON T1.CustomerID = T2.CustomerID WHERE T2.Currency = 'EUR' AND T1.Consumption > 1000.00,1525,63,1588,3.08,2.884,0.1923,True,0,True,True,0,0,0,False,0,1.0,3c1e5d82c2c8,semantic_check
+1521,debit_card_specializing,moderate,rag,True,0.4152,match (1 rows),"SELECT COUNT(*) AS transaction_count
+FROM transactions_1k t
+JOIN gasstations g ON t.GasStationID = g.GasStationID
+WHERE t.Date = '2012-08-26'
+  AND t.Time >= '08:00:00'
+  AND t.Time < '09:00:00'
+  AND g.Country = 'CZE'
+LIMIT 200;",SELECT COUNT(T1.TransactionID) FROM transactions_1k AS T1 INNER JOIN gasstations AS T2 ON T1.GasStationID = T2.GasStationID WHERE T1.Date = '2012-08-26' AND T1.Time BETWEEN '08:00:00' AND '09:00:00' AND T2.Country = 'CZE',2498,145,2643,4.66,4.653,0.0025,True,0,True,True,0,0,0,True,0,1.0,7c404f7a6262,semantic_check
+1524,debit_card_specializing,simple,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","SELECT c.Currency AS nationality
+FROM customers c
+JOIN transactions_1k t ON c.CustomerID = t.CustomerID
+WHERE t.Date = '2012-08-24' AND t.Price = 548.4
+LIMIT 200;",SELECT T2.Country FROM transactions_1k AS T1 INNER JOIN gasstations AS T2 ON T1.GasStationID = T2.GasStationID WHERE T1.Date = '2012-08-24' AND T1.Price  = 548.4,8726,305,9031,9.31,9.312,0.0022,True,0,True,True,2,2,1,False,0,1.0,28bfdd40251f,semantic_check
+186,financial,moderate,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","-- Step 1: Identify the core entities: client (gender), disp (type), account (frequency)
+-- Step 2: Join client -> disp -> account to link clients to their accounts
+-- Step 3: Filter for male clients (gender = 'M') and weekly statement frequency (frequency = 'POPLATEK TYDNE')
+-- Step 4: Calculate pe",SELECT CAST(SUM(T1.gender = 'M') AS REAL) * 100 / COUNT(T1.client_id) FROM client AS T1 INNER JOIN district AS T3 ON T1.district_id = T3.district_id INNER JOIN account AS T2 ON T2.district_id = T3.district_id INNER JOIN disp as T4 on T1.client_id = T4.client_id AND T2.account_id = T4.account_id WHER,3108,216,3324,4.8,4.789,0.0117,True,0,True,True,0,0,0,False,0,0.75,a0a4f8f554fe,semantic_check
+226,toxicology,moderate,rag,True,0.4815,match (1 rows),"SELECT ROUND(100.0 * SUM(CASE WHEN b.bond_type = '=' THEN 1 ELSE 0 END) / COUNT(*), 5) AS percentage_double_bonds
+FROM bond b
+WHERE b.molecule_id = 'TR008'
+LIMIT 200;","SELECT ROUND(CAST(COUNT(CASE WHEN T.bond_type = '=' THEN T.bond_id ELSE NULL END) AS REAL) * 100 / COUNT(T.bond_id),5) FROM bond AS T WHERE T.molecule_id = 'TR008'",1929,65,1994,3.36,3.35,0.0061,True,0,True,True,0,0,0,False,0,1.0,377cda982057,semantic_check
+227,toxicology,simple,rag,True,0.4143,match (1 rows),"SELECT ROUND(100.0 * SUM(CASE WHEN label = '+' THEN 1 ELSE 0 END) / COUNT(*), 3) AS percentage_carcinogenic
+FROM molecule
+LIMIT 200;","SELECT ROUND(CAST(COUNT(CASE WHEN T.label = '+' THEN T.molecule_id ELSE NULL END) AS REAL) * 100 / COUNT(T.molecule_id),3) FROM molecule t",9541,241,9782,10.05,10.046,0.0027,True,0,True,True,2,2,1,False,0,1.0,55c5ced9de3d,semantic_check
+228,toxicology,moderate,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","-- Step 1: Count hydrogen atoms in molecule TR206
+-- Step 2: Count total atoms in molecule TR206
+-- Step 3: Calculate percentage of hydrogen atoms
+WITH
+step1 AS (
+  SELECT COUNT(*) AS hydrogen_count
+  FROM atom
+  WHERE molecule_id = 'TR206' AND element = 'H'
+),
+step2 AS (
+  SELECT COUNT(*) AS total_","SELECT ROUND(CAST(COUNT(CASE WHEN T.element = 'h' THEN T.atom_id ELSE NULL END) AS REAL) * 100 / COUNT(T.atom_id),4) FROM atom AS T WHERE T.molecule_id = 'TR206'",11614,737,12351,16.04,16.031,0.0068,True,0,True,False,1,3,1,True,3,1.0,60d7d632e30b,refiner
+244,toxicology,moderate,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","-- Step 1: Count double bonds per molecule
+-- Step 2: Find the molecule with the most double bonds
+-- Step 3: Join with molecule table to get label and interpret carcinogenicity
+WITH double_bond_counts AS (
+  SELECT molecule_id, COUNT(bond_id) AS double_bond_count
+  FROM bond
+  WHERE bond_type = '='","SELECT T1.label FROM molecule AS T1 INNER JOIN ( SELECT T.molecule_id, COUNT(T.bond_type) FROM bond AS T WHERE T.bond_type = '=' GROUP BY T.molecule_id ORDER BY COUNT(T.bond_type) DESC LIMIT 1 ) AS T2 ON T1.molecule_id = T2.molecule_id",11839,912,12751,15.17,15.162,0.005,True,0,True,True,0,2,3,False,0,1.0,909a3d79e6bc,semantic_check
+25,california_schools,moderate,rag,False,0.0,"mismatch: gold=6 rows, gen=8 rows","WITH step1 AS (
+  SELECT s.CDSCode, s.School, AVG(sc.AvgScrMath) AS avg_math
+  FROM schools s
+  JOIN satscores sc ON s.CDSCode = sc.cds
+  WHERE s.County = 'Riverside'
+  GROUP BY s.CDSCode, s.School
+  HAVING AVG(sc.AvgScrMath) > 400
+)
+SELECT step1.School, f.""Charter Funding Type""
+FROM step1
+LEFT JOIN","SELECT T1.sname, T2.`Charter Funding Type` FROM satscores AS T1 INNER JOIN frpm AS T2 ON T1.cds = T2.CDSCode WHERE T2.`District Name` LIKE 'Riverside%' GROUP BY T1.sname, T2.`Charter Funding Type` HAVING CAST(SUM(T1.AvgScrMath) AS REAL) / COUNT(T1.cds) > 400",27706,786,28492,17.48,17.461,0.0212,True,0,True,True,0,2,1,True,2,1.0,67958779d001,semantic_check
+26,california_schools,moderate,rag,False,0.0,"mismatch: gold=5 rows, gen=6 rows","-- Step 1: Identify CDSCodes of high schools in Monterey County
+-- Step 2: Filter those with FRPM Count (Ages 5-17) > 800 (ages 15-17 not available, using ages 5-17 as closest proxy)
+-- Step 3: Get school names and full communication address (Street, City, State, Zip)
+WITH step1 AS (
+  SELECT CDSCod","SELECT T1.`School Name`, T2.Street, T2.City, T2.State, T2.Zip FROM frpm AS T1 INNER JOIN schools AS T2 ON T1.CDSCode = T2.CDSCode WHERE T2.County = 'Monterey' AND T1.`Free Meal Count (Ages 5-17)` > 800 AND T1.`School Type` = 'High Schools (Public)'",34726,1732,36458,21.21,21.191,0.0151,True,0,True,False,2,3,1,True,3,1.0,1764693ec398,refiner
+268,toxicology,challenging,rag,False,0.0,"mismatch: gold=2 rows, gen=2 rows","SELECT a1.element AS element1, a2.element AS element2
+FROM connected c
+JOIN atom a1 ON c.atom_id = a1.atom_id
+JOIN atom a2 ON c.atom_id2 = a2.atom_id
+WHERE c.bond_id = 'TR001_10_11'
+LIMIT 200;",SELECT T2.element FROM connected AS T1 INNER JOIN atom AS T2 ON T1.atom_id = T2.atom_id WHERE T1.bond_id = 'TR001_10_11',1667,77,1744,3.18,3.177,0.0048,True,0,True,True,0,0,0,False,0,1.0,d11902f0c173,semantic_check
+28,california_schools,challenging,rag,False,0.0,"mismatch: gold=57 rows, gen=57 rows","-- Step 1: Calculate the average difference between K-12 enrollment and 15-17 enrollment for locally funded schools
+WITH avg_diff AS (
+  SELECT AVG(f.""Enrollment (K-12)"" - f.""Enrollment (Ages 5-17)"") AS avg_difference
+  FROM frpm f
+  JOIN schools s ON f.CDSCode = s.CDSCode
+  WHERE s.FundingType = 'L","SELECT T2.School, T2.DOC FROM frpm AS T1 INNER JOIN schools AS T2 ON T1.CDSCode = T2.CDSCode WHERE T2.FundingType = 'Locally funded' AND (T1.`Enrollment (K-12)` - T1.`Enrollment (Ages 5-17)`) > (SELECT AVG(T3.`Enrollment (K-12)` - T3.`Enrollment (Ages 5-17)`) FROM frpm AS T3 INNER JOIN schools AS T4",28768,1377,30145,19.25,19.207,0.0385,True,0,True,False,1,3,1,True,2,1.0,44d9ccd3cb0a,refiner
+340,card_games,simple,rag,False,0.0,"mismatch: gold=1000 rows, gen=200 rows","SELECT c.id, c.name
+FROM cards c
+WHERE c.cardKingdomFoilId IS NOT NULL
+  AND c.cardKingdomId IS NOT NULL
+LIMIT 200;",SELECT id FROM cards WHERE cardKingdomFoilId IS NOT NULL AND cardKingdomId IS NOT NULL,58297,575,58872,17.82,17.81,0.009,True,0,True,False,1,3,2,False,0,1.0,87d898cb910f,refiner
+345,card_games,moderate,rag,False,0.0,"mismatch: gold=3 rows, gen=200 rows","-- Step 1: Get UUIDs of artifact cards that do not have multiple faces (side is empty)
+WITH artifact_cards AS (
+  SELECT uuid
+  FROM cards
+  WHERE type LIKE '%Artifact%'
+    AND (side IS NULL OR side = '')
+),
+-- Step 2: Get legalities status for vintage format for those UUIDs
+vintage_legalities AS (",SELECT DISTINCT T2.status FROM cards AS T1 INNER JOIN legalities AS T2 ON T1.uuid = T2.uuid WHERE T1.type = 'Artifact' AND T2.format = 'vintage' AND T1.side IS NULL,27979,515,28494,11.36,11.344,0.0188,True,0,True,True,0,1,1,True,2,1.0,7f417ba49342,semantic_check
+368,card_games,simple,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","SELECT ROUND(100.0 * SUM(CASE WHEN borderColor = 'borderless' THEN 1 ELSE 0 END) / COUNT(*), 2) AS percentage_borderless
+FROM cards;",SELECT CAST(SUM(CASE WHEN borderColor = 'borderless' THEN 1 ELSE 0 END) AS REAL) * 100 / COUNT(id) FROM cards,24692,147,24839,7.68,7.617,0.0654,True,0,True,True,0,1,1,False,0,1.0,67fd46dcad04,semantic_check
+377,card_games,simple,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","SELECT COUNT(*) AS card_count
+FROM cards
+WHERE originalType = 'Summon - Angel'
+  AND subtypes IS NOT NULL
+  AND subtypes NOT LIKE '%Angel%'
+LIMIT 200;",SELECT COUNT(id) FROM cards WHERE originalType = 'Summon - Angel' AND subtypes != 'Angel',52331,396,52727,15.69,15.576,0.1091,True,0,True,False,1,3,2,True,0,1.0,94825098213f,refiner
+379,card_games,simple,rag,True,1.1876,match (804 rows),SELECT id FROM cards WHERE duelDeck = 'a',SELECT id FROM cards WHERE duelDeck = 'a',7199,16,7215,2.6,2.531,0.0652,True,0,True,True,0,0,0,False,0,1.0,e80e57ad3e13,semantic_check
+407,card_games,moderate,rag,False,0.0,"mismatch: gold=1000 rows, gen=200 rows","SELECT DISTINCT fd.type AS german_type
+FROM foreign_data fd
+WHERE fd.language = 'German'
+LIMIT 200;","SELECT T1.subtypes, T1.supertypes FROM cards AS T1 INNER JOIN foreign_data AS T2 ON T1.uuid = T2.uuid WHERE T2.language = 'German' AND T1.subtypes IS NOT NULL AND T1.supertypes IS NOT NULL",7726,31,7757,2.82,2.816,0.0071,True,0,True,True,0,0,0,False,0,1.0,8e3144c778da,semantic_check
+41,california_schools,simple,rag,False,0.0,"mismatch: gold=34 rows, gen=0 rows","-- Step 1: Identify virtual schools (Virtual = 'Yes') and their average reading scores per county
+-- Step 2: Rank schools within each county by average reading score (descending) using a correlated subquery
+-- Step 3: Filter to top 5 per county and return school names
+WITH virtual_scores AS (
+  SELE","SELECT School FROM (SELECT T2.School,T1.AvgScrRead, RANK() OVER (PARTITION BY T2.County ORDER BY T1.AvgScrRead DESC) AS rnk FROM satscores AS T1 INNER JOIN schools AS T2 ON T1.cds = T2.CDSCode WHERE T2.Virtual = 'F' ) ranked_schools WHERE rnk <= 5",39396,1901,41297,26.41,26.394,0.0188,True,0,True,False,1,3,3,True,2,1.0,bb46d0ca734d,refiner
+422,card_games,simple,rag,True,1.4653,match (1 rows),"SELECT language
+FROM foreign_data
+WHERE multiverseid = 149934
+LIMIT 200;",SELECT language FROM foreign_data WHERE multiverseid = 149934,7217,25,7242,3.11,3.016,0.0968,True,0,True,True,0,0,0,False,0,1.0,9640b6250372,semantic_check
+459,card_games,moderate,rag,False,0.0,"mismatch: gold=1 rows, gen=2 rows","SELECT name, convertedManaCost
+FROM cards
+WHERE name IN ('Serra Angel', 'Shrine Keeper')
+GROUP BY name
+LIMIT 200;","SELECT name FROM cards WHERE name IN ('Serra Angel', 'Shrine Keeper') ORDER BY convertedManaCost DESC LIMIT 1",24593,111,24704,13.93,13.843,0.089,True,0,True,True,0,1,1,False,0,1.0,40e1e5bd3954,semantic_check
+46,california_schools,simple,rag,False,0.0,"mismatch: gold=1 rows, gen=3 rows","SELECT s.`School Name`, s.`Enrollment (K-12)`
+FROM frpm s
+JOIN schools sch ON s.CDSCode = sch.CDSCode
+WHERE sch.SOCType = 'State Special Schools'
+ORDER BY s.`Enrollment (K-12)` DESC
+LIMIT 200;",SELECT T2.School FROM frpm AS T1 INNER JOIN schools AS T2 ON T1.CDSCode = T2.CDSCode WHERE T2.DOC = 31 ORDER BY T1.`Enrollment (K-12)` DESC LIMIT 1,29507,662,30169,12.93,12.6,0.3261,False,1,True,,0,3,3,False,0,1.0,db232a4090a1,refiner
+465,card_games,moderate,rag,False,0.0,"generated SQL failed: SQL parse error: Error tokenizing 'sen' LIMIT 1)
+  AND language = 'Korean'
+LIMIT","SELECT COUNT(*) > 0 AS has_korean_version
+FROM foreign_data
+WHERE uuid = (SELECT uuid FROM cards WHERE name = 'Ancestor's Chosen' LIMIT 1)
+  AND language = 'Korean'
+LIMIT 200;","SELECT IIF(SUM(CASE WHEN T2.language = 'Korean' AND T2.translation IS NOT NULL THEN 1 ELSE 0 END) > 0, 'YES', 'NO') FROM cards AS T1 INNER JOIN set_translations AS T2 ON T2.setCode = T1.setCode WHERE T1.name = 'Ancestor''s Chosen'",38720,280,39000,11.03,11.029,0.0007,False,2,True,,0,3,1,False,0,1.0,b6a26a82b533,refiner
+480,card_games,moderate,rag,True,1.502,match (2 rows),"SELECT fd.flavorText AS italian_flavor_text
+FROM foreign_data fd
+JOIN cards c ON fd.uuid = c.uuid
+WHERE fd.language = 'Italian'
+  AND c.name = 'Ancestor''s Chosen'
+LIMIT 200;",SELECT T2.flavorText FROM cards AS T1 INNER JOIN foreign_data AS T2 ON T2.uuid = T1.uuid WHERE T1.name = 'Ancestor''s Chosen' AND T2.language = 'Italian',7752,61,7813,12.18,11.9,0.2765,True,0,True,True,0,0,0,False,0,1.0,e219f3130166,semantic_check
+484,card_games,moderate,rag,False,0.0,"mismatch: gold=155 rows, gen=12 rows","-- Step 1: Get the set code for 'Coldsnap'
+WITH step1 AS (
+    SELECT code
+    FROM sets
+    WHERE name = 'Coldsnap'
+),
+-- Step 2: Find UUIDs and converted mana costs of cards in that set, and get the max converted mana cost
+step2 AS (
+    SELECT uuid, convertedManaCost
+    FROM cards
+    WHERE setC",SELECT T2.name FROM foreign_data AS T1 INNER JOIN cards AS T2 ON T2.uuid = T1.uuid INNER JOIN sets AS T3 ON T3.code = T2.setCode WHERE T3.name = 'Coldsnap' AND T1.language = 'Italian' ORDER BY T2.convertedManaCost DESC,28538,827,29365,13.62,13.238,0.3818,True,0,True,True,0,1,1,True,3,1.0,470177c90b2c,semantic_check
+528,card_games,challenging,rag,False,0.0,"mismatch: gold=1000 rows, gen=200 rows","-- Step 1: Get cards from 'Hour of Devastation' set
+WITH step1 AS (
+  SELECT c.name, c.uuid
+  FROM cards c
+  JOIN sets s ON c.setCode = s.code
+  WHERE s.name = 'Hour of Devastation'
+)
+-- Step 2: Join with legalities to get formats where status is 'Legal'
+SELECT step1.name AS card_name, l.format, l.s","SELECT DISTINCT T2.name , CASE WHEN T1.status = 'Legal' THEN T1.format ELSE NULL END FROM legalities AS T1 INNER JOIN cards AS T2 ON T2.uuid = T1.uuid WHERE T2.setCode IN ( SELECT code FROM sets WHERE name = 'Hour of Devastation' )",28237,506,28743,22.21,21.162,1.0496,True,0,True,True,0,1,1,True,2,1.0,3160bf043052,semantic_check
+537,codebase_community,simple,rag,True,1.5065,match (1 rows),"SELECT COUNT(*) AS post_count
+FROM posts
+JOIN users ON posts.OwnerUserId = users.Id
+WHERE users.DisplayName = 'csgillespie'
+LIMIT 200;",SELECT COUNT(T1.id) FROM posts AS T1 INNER JOIN users AS T2 ON T1.OwnerUserId = T2.Id WHERE T2.DisplayName = 'csgillespie',15129,116,15245,7.93,7.644,0.2822,True,0,True,True,0,1,1,False,0,1.0,7633f2b4de4e,semantic_check
+544,codebase_community,moderate,rag,True,1.5153,match (1 rows),"SELECT u.DisplayName
+FROM posts p
+JOIN users u ON p.LastEditorUserId = u.Id
+WHERE p.Title = 'Examples for teaching: Correlation does not mean causation'
+LIMIT 200;",SELECT T2.DisplayName FROM posts AS T1 INNER JOIN users AS T2 ON T1.LastEditorUserId = T2.Id WHERE T1.Title = 'Examples for teaching: Correlation does not mean causation',5631,104,5735,4.88,4.738,0.1378,True,0,True,True,0,0,0,True,0,1.0,2eeeb33b7915,semantic_check
+565,codebase_community,moderate,rag,False,0.0,"mismatch: gold=1 rows, gen=0 rows","-- Step 1: Find the PostId of the comment made by UserId 23853 on 2013-07-12 09:08:18
+WITH step1 AS (
+    SELECT PostId
+    FROM comments
+    WHERE UserId = 23853
+      AND CreationDate = '2013-07-12 09:08:18'
+)
+-- Step 2: For the post found in step 1, check if its ClosedDate is null or empty to det","SELECT IIF(T2.ClosedDate IS NULL, 'NOT well-finished', 'well-finished') AS resylt FROM comments AS T1 INNER JOIN posts AS T2 ON T1.PostId = T2.Id WHERE T1.UserId = 23853 AND T1.CreationDate = '2013-07-12 09:08:18.0'",27156,975,28131,16.63,16.55,0.0811,True,0,True,True,2,2,1,True,2,1.0,bc470c5e7380,semantic_check
+567,codebase_community,simple,rag,True,1.6789,match (1 rows),"SELECT COUNT(*) AS post_count
+FROM posts
+WHERE OwnerUserId = (SELECT Id FROM users WHERE DisplayName = 'Tiago Pasqualini')
+LIMIT 200;",SELECT COUNT(T1.Id) FROM users AS T1 INNER JOIN posts AS T2 ON T1.Id = T2.OwnerUserId WHERE T1.DisplayName = 'Tiago Pasqualini',4648,39,4687,3.3,3.096,0.2018,True,0,True,True,0,0,0,False,0,1.0,c017fa0b175a,semantic_check
+581,codebase_community,moderate,rag,True,1.4168,match (1 rows),"SELECT u.DisplayName AS owner_display_name
+FROM posts p
+JOIN users u ON p.OwnerUserId = u.Id
+WHERE p.Title = 'Open source tools for visualizing multi-dimensional data?'
+LIMIT 200;",SELECT T2.DisplayName FROM posts AS T1 INNER JOIN users AS T2 ON T1.OwnerUserId = T2.Id WHERE T1.Title = 'Open source tools for visualizing multi-dimensional data?',5045,52,5097,3.67,3.534,0.1401,True,0,True,True,0,0,0,False,0,1.0,bf3aab3a28e7,semantic_check
+595,codebase_community,moderate,rag,False,0.0,"mismatch: gold=94 rows, gen=0 rows","-- Step 1: Find users who have exactly one post history entry for each post they own
+-- Step 2: Find users whose posts have at least 1000 views
+-- Step 3: Intersect the two sets
+WITH step1 AS (
+    SELECT ph.UserId
+    FROM postHistory ph
+    GROUP BY ph.UserId
+    HAVING COUNT(DISTINCT ph.PostId) =",SELECT T2.UserId FROM users AS T1 INNER JOIN postHistory AS T2 ON T1.Id = T2.UserId INNER JOIN posts AS T3 ON T2.PostId = T3.Id WHERE T3.ViewCount >= 1000 GROUP BY T2.UserId HAVING COUNT(DISTINCT T2.PostHistoryTypeId) = 1,32582,1117,33699,86.88,85.95,0.9248,True,0,True,False,1,3,3,True,3,1.0,c56e9e818235,refiner
+633,codebase_community,moderate,rag,True,2.2026,match (1 rows),"SELECT p.Id AS post_id
+FROM posts p
+JOIN users u ON p.OwnerUserId = u.Id
+WHERE u.DisplayName = 'slashnick'
+ORDER BY p.AnswerCount DESC
+LIMIT 1;",SELECT T2.PostId FROM users AS T1 INNER JOIN postHistory AS T2 ON T1.Id = T2.UserId INNER JOIN posts AS T3 ON T2.PostId = T3.Id WHERE T1.DisplayName = 'slashnick' ORDER BY T3.AnswerCount DESC LIMIT 1,5185,51,5236,3.5,3.036,0.4652,True,0,True,True,0,0,0,False,0,0.6667,c31bf8525dc5,semantic_check
+637,codebase_community,moderate,rag,False,0.0,"mismatch: gold=5 rows, gen=1 rows","-- Step 1: Find Mark Meckes' user ID
+-- Step 2: Find his posts (OwnerUserId matches his ID)
+-- Step 3: Filter posts that have 0 comments (CommentCount = 0)
+-- Step 4: Extract tags from those posts (Tags column contains XML-like tag strings)
+-- Step 5: Parse individual tag names from the Tags column ",SELECT T3.Tags FROM users AS T1 INNER JOIN postHistory AS T2 ON T1.Id = T2.UserId INNER JOIN posts AS T3 ON T3.Id = T2.PostId WHERE T1.DisplayName = 'Mark Meckes' AND T3.CommentCount = 0,31012,1363,32375,27.07,26.928,0.1392,True,0,True,False,1,3,3,False,0,1.0,e9dc561eeebc,refiner
+669,codebase_community,simple,rag,True,1.1531,match (1 rows),"-- Step 1: Find the user 'chl' and join with votes on UserId
+-- Step 2: Filter votes that have a non-null PostId (votes on posts)
+-- Step 3: Get the minimum CreationDate
+SELECT MIN(v.CreationDate) AS first_vote_date
+FROM votes v
+JOIN users u ON v.UserId = u.Id
+WHERE u.DisplayName = 'chl'
+  AND v.Pos",SELECT T2.CreationDate FROM users AS T1 INNER JOIN votes AS T2 ON T1.Id = T2.UserId WHERE T1.DisplayName = 'chl' ORDER BY T2.CreationDate LIMIT 1,20813,319,21132,9.33,9.315,0.0096,True,0,True,True,0,1,3,False,0,1.0,bff2243542f7,semantic_check
+671,codebase_community,simple,rag,True,1.0957,match (1 rows),"SELECT u.DisplayName
+FROM badges b
+JOIN users u ON b.UserId = u.Id
+WHERE b.Name = 'Autobiographer'
+ORDER BY b.Date ASC
+LIMIT 1;",SELECT T1.DisplayName FROM users AS T1 INNER JOIN badges AS T2 ON T1.Id = T2.UserId WHERE T2.`Name` = 'Autobiographer' ORDER BY T2.Date LIMIT 1,4822,95,4917,2.73,2.694,0.0402,True,0,True,True,0,0,0,False,0,1.0,a6dd100f1666,semantic_check
+687,codebase_community,simple,rag,True,1.9154,match (1 rows),"SELECT COUNT(*) AS comment_count
+FROM comments
+WHERE PostId = (
+    SELECT Id
+    FROM posts
+    ORDER BY Score DESC
+    LIMIT 1
+)
+LIMIT 200;",SELECT COUNT(T2.Id) FROM posts AS T1 INNER JOIN comments AS T2 ON T1.Id = T2.PostId GROUP BY T1.Id ORDER BY T1.Score DESC LIMIT 1,5586,46,5632,3.24,3.041,0.1956,True,0,True,True,0,0,0,False,0,1.0,8badb5f64f2a,semantic_check
+707,codebase_community,moderate,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","SELECT c.Text, c.Score
+FROM comments c
+JOIN posts p ON c.PostId = p.Id
+WHERE p.ViewCount BETWEEN 100 AND 150
+ORDER BY c.Score DESC
+LIMIT 1;",SELECT Text FROM comments WHERE PostId IN ( SELECT Id FROM posts WHERE ViewCount BETWEEN 100 AND 150 ) ORDER BY Score DESC LIMIT 1,5291,52,5343,3.92,3.467,0.4516,True,0,True,True,0,0,0,False,0,1.0,955009003273,semantic_check
+740,superhero,moderate,rag,True,0.393,match (1 rows),"SELECT COUNT(DISTINCT s.id) AS female_superheroes_with_strength_100
+FROM superhero s
+JOIN gender g ON s.gender_id = g.id
+JOIN hero_attribute ha ON s.id = ha.hero_id
+JOIN attribute a ON ha.attribute_id = a.id
+WHERE g.gender = 'Female'
+  AND a.attribute_name = 'Strength'
+  AND ha.attribute_value = 100",SELECT COUNT(T1.id) FROM superhero AS T1 INNER JOIN hero_attribute AS T2 ON T1.id = T2.hero_id INNER JOIN attribute AS T3 ON T2.attribute_id = T3.id INNER JOIN gender AS T4 ON T1.gender_id = T4.id WHERE T3.attribute_name = 'Strength' AND T2.attribute_value = 100 AND T4.gender = 'Female',2498,102,2600,3.15,3.148,0.0052,True,0,True,True,0,0,0,False,0,1.0,d7283d334df1,semantic_check
+773,superhero,challenging,rag,True,0.727,match (157 rows),"-- Step 1: Identify superheroes where eye_colour_id, hair_colour_id, and skin_colour_id are all equal
+-- Step 2: Join with colour table to get the actual colour names (though not strictly needed for the condition)
+-- Step 3: Join with publisher table to get the publisher name
+SELECT s.superhero_name","SELECT T1.superhero_name, T2.publisher_name FROM superhero AS T1 INNER JOIN publisher AS T2 ON T1.publisher_id = T2.id WHERE T1.eye_colour_id = T1.hair_colour_id AND T1.eye_colour_id = T1.skin_colour_id",12378,566,12944,11.73,11.724,0.0029,True,0,True,True,0,1,3,True,0,1.0,4b8a2fee29ab,semantic_check
+785,superhero,simple,rag,True,0.9463,match (28 rows),"SELECT superhero_name
+FROM superhero
+WHERE alignment_id = (SELECT id FROM alignment WHERE alignment = 'Neutral')
+LIMIT 200;",SELECT T1.superhero_name FROM superhero AS T1 INNER JOIN alignment AS T2 ON T1.alignment_id = T2.id WHERE T2.alignment = 'Neutral',2494,32,2526,1.77,1.765,0.0022,True,0,True,True,0,0,0,False,0,1.0,8302d14516ba,semantic_check
+790,superhero,moderate,rag,True,0.6622,match (1 rows),"SELECT 
+    (SELECT weight_kg FROM superhero WHERE full_name = 'Emil Blonsky') -
+    (SELECT weight_kg FROM superhero WHERE full_name = 'Charles Chandler') AS weight_difference
+LIMIT 200;",SELECT ( SELECT weight_kg FROM superhero WHERE full_name LIKE 'Emil Blonsky' ) - ( SELECT weight_kg FROM superhero WHERE full_name LIKE 'Charles Chandler' ) AS CALCULATE,2586,53,2639,4.06,4.061,0.0015,True,0,True,True,0,0,0,False,0,1.0,0127af736ad8,semantic_check
+797,superhero,moderate,rag,False,0.0,"mismatch: gold=22 rows, gen=22 rows","SELECT s.superhero_name, s.full_name
+FROM superhero s
+JOIN colour eye ON s.eye_colour_id = eye.id
+JOIN colour hair ON s.hair_colour_id = hair.id
+WHERE eye.colour = 'Blue'
+  AND hair.colour = 'Brown'
+LIMIT 200;",SELECT T1.superhero_name FROM superhero AS T1 INNER JOIN colour AS T2 ON T1.eye_colour_id = T2.id INNER JOIN colour AS T3 ON T1.hair_colour_id = T3.id WHERE T2.colour = 'Blue' AND T3.colour = 'Brown',2477,71,2548,2.54,2.534,0.0044,True,0,True,True,0,0,0,False,0,1.0,74dcc085ac7a,semantic_check
+82,california_schools,simple,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows",SELECT GSoffered FROM schools ORDER BY Longitude DESC LIMIT 1,SELECT GSoffered FROM schools ORDER BY ABS(longitude) DESC LIMIT 1,15182,63,15245,6.05,6.025,0.0285,True,0,True,True,0,1,1,False,0,1.0,108426330497,semantic_check
+825,superhero,moderate,rag,True,0.6845,match (1 rows),"SELECT g.gender
+FROM superhero s
+JOIN hero_power hp ON s.id = hp.hero_id
+JOIN superpower sp ON hp.power_id = sp.id
+JOIN gender g ON s.gender_id = g.id
+WHERE sp.power_name = 'Phoenix Force'
+LIMIT 200;",SELECT T4.gender FROM superhero AS T1 INNER JOIN hero_power AS T2 ON T1.id = T2.hero_id INNER JOIN superpower AS T3 ON T2.power_id = T3.id INNER JOIN gender AS T4 ON T1.gender_id = T4.id WHERE T3.power_name = 'Phoenix Force',2499,71,2570,3.83,3.824,0.0065,True,0,True,True,0,0,0,False,0,1.0,717a017232e9,semantic_check
+850,formula_1,simple,rag,False,0.0,"mismatch: gold=3 rows, gen=76 rows","SELECT r.name AS race_name
+FROM races r
+JOIN circuits c ON r.circuitId = c.circuitId
+WHERE c.country = 'Germany'
+LIMIT 200;",SELECT DISTINCT T2.name FROM circuits AS T1 INNER JOIN races AS T2 ON T2.circuitID = T1.circuitId WHERE T1.country = 'Germany',4697,45,4742,2.57,2.57,0.0029,True,0,True,True,0,0,0,False,0,1.0,ed35ff4c2072,semantic_check
+857,formula_1,simple,rag,False,0.0,"mismatch: gold=1 rows, gen=9 rows","SELECT c.lat, c.lng
+FROM circuits c
+JOIN races r ON c.circuitId = r.circuitId
+WHERE r.name = 'Abu Dhabi Grand Prix'
+LIMIT 200;","SELECT DISTINCT T1.lat, T1.lng FROM circuits AS T1 INNER JOIN races AS T2 ON T2.circuitID = T1.circuitId WHERE T2.name = 'Abu Dhabi Grand Prix'",18807,276,19083,7.95,7.944,0.0018,True,0,True,True,0,1,2,False,0,1.0,043fca72330d,semantic_check
+861,formula_1,simple,rag,False,0.0,"mismatch: gold=2 rows, gen=0 rows","WITH step1 AS (
+  SELECT driverId
+  FROM qualifying
+  WHERE raceId = 903 AND q3 = '0:01:54'
+)
+SELECT d.number AS driver_number
+FROM step1 s
+JOIN drivers d ON s.driverId = d.driverId
+LIMIT 200;",SELECT T2.number FROM qualifying AS T1 INNER JOIN drivers AS T2 ON T2.driverId = T1.driverId WHERE T1.raceId = 903 AND T1.q3 LIKE '1:54%',22674,432,23106,12.37,12.37,0.0026,True,0,True,True,2,2,1,True,2,1.0,6dc344fd2c97,semantic_check
+862,formula_1,simple,rag,True,2.2469,match (1 rows),"SELECT COUNT(*) AS not_finished_count
+FROM results
+JOIN races ON results.raceId = races.raceId
+WHERE races.name = 'Bahrain Grand Prix'
+  AND races.year = 2007
+  AND results.statusId != 1
+LIMIT 200;",SELECT COUNT(T3.driverId) FROM races AS T1 INNER JOIN results AS T2 ON T2.raceId = T1.raceId INNER JOIN drivers AS T3 ON T3.driverId = T2.driverId WHERE T1.year = 2007 AND T1.name = 'Bahrain Grand Prix' AND T2.time IS NULL,28862,525,29387,18.96,18.948,0.0089,True,0,True,False,2,3,3,False,0,1.0,f5e2c92939f0,refiner
+868,formula_1,simple,rag,True,0.5555,match (1 rows),"SELECT lat, lng
+FROM circuits
+WHERE circuitId = (
+    SELECT circuitId
+    FROM races
+    WHERE name = 'Malaysian Grand Prix'
+    LIMIT 1
+)
+LIMIT 200;","SELECT DISTINCT T1.lat, T1.lng FROM circuits AS T1 INNER JOIN races AS T2 ON T2.circuitID = T1.circuitId WHERE T2.name = 'Malaysian Grand Prix'",4948,50,4998,2.46,2.453,0.0018,True,0,True,True,0,0,0,False,0,1.0,956ad7d90711,semantic_check
+877,formula_1,moderate,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","-- Step 1: Identify drivers who finished the race (status = 'Finished') in raceId 872
+-- Step 2: Join with drivers table to get date of birth
+-- Step 3: Order by date of birth descending (youngest first) and limit to 1
+SELECT d.forename, d.surname, d.dob
+FROM results r
+JOIN drivers d ON r.driverId =","SELECT T1.forename, T1.surname FROM drivers AS T1 INNER JOIN results AS T2 ON T2.driverId = T1.driverId WHERE T2.raceId = 872 AND T2.time IS NOT NULL ORDER BY T1.dob DESC LIMIT 1",5329,138,5467,5.17,5.167,0.0067,True,0,True,True,0,0,0,False,0,1.0,010cda88565a,semantic_check
+879,formula_1,moderate,rag,True,1.6328,match (1 rows),"SELECT d.nationality
+FROM results r
+JOIN drivers d ON r.driverId = d.driverId
+WHERE r.fastestLapSpeed = (SELECT MAX(fastestLapSpeed) FROM results)
+LIMIT 200;",SELECT T1.nationality FROM drivers AS T1 INNER JOIN results AS T2 ON T2.driverId = T1.driverId ORDER BY T2.fastestLapSpeed DESC LIMIT 1,4639,56,4695,1.83,1.818,0.0089,True,0,True,True,0,0,0,False,0,1.0,78ec1371943d,semantic_check
+93,financial,moderate,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","SELECT COUNT(DISTINCT T1.client_id) AS male_customer_count
+FROM client AS T1
+INNER JOIN district AS T2 ON T1.district_id = T2.district_id
+WHERE T1.gender = 'M'
+  AND T2.A3 = 'North Bohemia'
+  AND T2.A11 > 8000
+LIMIT 200;",SELECT COUNT(T1.client_id) FROM client AS T1 INNER JOIN district AS T2 ON T1.district_id = T2.district_id WHERE T1.gender = 'M' AND T2.A3 = 'north Bohemia' AND T2.A11 > 8000,16599,426,17025,10.07,10.068,0.0036,True,0,True,True,2,2,1,False,0,1.0,4866c5ce39c5,semantic_check
+931,formula_1,moderate,rag,False,0.0,"mismatch: gold=1 rows, gen=1 rows","SELECT MAX(CAST(r.fastestLapSpeed AS REAL)) AS fastest_lap_speed
+FROM results r
+JOIN races ra ON r.raceId = ra.raceId
+WHERE ra.name = 'Spanish Grand Prix' AND ra.year = 2009
+LIMIT 200;",SELECT T2.fastestLapSpeed FROM races AS T1 INNER JOIN results AS T2 ON T2.raceId = T1.raceId WHERE T1.name = 'Spanish Grand Prix' AND T1.year = 2009 AND T2.fastestLapSpeed IS NOT NULL ORDER BY T2.fastestLapSpeed DESC LIMIT 1,14057,194,14251,7.15,7.139,0.0063,True,0,True,True,0,1,1,False,0,1.0,d6c6748fd0d9,semantic_check
+937,formula_1,simple,rag,False,0.0,"mismatch: gold=1 rows, gen=0 rows","SELECT r.time AS finish_time
+FROM races ra
+JOIN results r ON ra.raceId = r.raceId
+WHERE ra.year = 2008
+  AND ra.name = 'Australian Grand Prix'
+  AND r.positionOrder = 2
+LIMIT 200;",SELECT T1.time FROM results AS T1 INNER JOIN races AS T2 on T1.raceId = T2.raceId WHERE T1.rank = 2 AND T2.name = 'Chinese Grand Prix' AND T2.year = 2008,27765,430,28195,14.92,14.914,0.0081,True,0,True,False,1,3,1,False,0,1.0,cf253ce87d13,refiner
+964,formula_1,simple,rag,True,1.0736,match (157 rows),SELECT code FROM drivers WHERE nationality = 'American',SELECT code FROM drivers WHERE Nationality = 'American',4871,15,4886,2.56,2.562,0.0023,True,0,True,True,0,0,0,False,0,1.0,379c872c2db1,semantic_check
+972,formula_1,moderate,rag,False,0.0,"mismatch: gold=150 rows, gen=2 rows","-- Step 1: Identify drivers born in 1971
+-- Step 2: For each race, find the fastest lap time (minimum milliseconds) per race
+-- Step 3: Join with drivers born in 1971 to find those who achieved the fastest lap in any race
+WITH
+drivers_1971 AS (
+    SELECT driverId, code
+    FROM drivers
+    WHERE st","SELECT T2.driverId, T2.code FROM results AS T1 INNER JOIN drivers AS T2 on T1.driverId = T2.driverId WHERE STRFTIME('%Y', T2.dob) = '1971' AND T1.fastestLapTime IS NOT NULL",27598,1524,29122,21.58,21.555,0.0254,True,0,True,True,0,2,3,True,3,1.0,5d2c9fd5fd8c,semantic_check
+981,formula_1,moderate,rag,True,0.7961,match (1 rows),"-- Step 1: Find the youngest driver (by date of birth) who has participated in qualifying
+WITH youngest_driver AS (
+    SELECT d.driverId, d.dob
+    FROM drivers d
+    WHERE d.driverId IN (SELECT DISTINCT driverId FROM qualifying)
+    ORDER BY d.dob DESC
+    LIMIT 1
+),
+-- Step 2: For that driver, fi","SELECT T3.year, T3.name, T3.date, T3.time FROM qualifying AS T1 INNER JOIN drivers AS T2 on T1.driverId = T2.driverId INNER JOIN races AS T3 on T1.raceId = T3.raceId WHERE T1.driverId = ( SELECT driverId FROM drivers ORDER BY dob DESC LIMIT 1 ) ORDER BY T3.date ASC LIMIT 1",24077,1079,25156,18.46,18.45,0.0054,True,0,True,True,2,2,1,True,2,1.0,a56ef16b7c47,semantic_check

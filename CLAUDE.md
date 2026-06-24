@@ -475,7 +475,7 @@ nl2sql-mini-agent/
     infrastructure/        # broker.py (Kafka 抽象) + task_store.py (Redis 状态机)
     storage/               # Redis 缓存 + config + db_registry
     guard/                 # safety_rules + error_types + error_classifier
-    tools/                 # sql_executor + mcp/ (validate_sql + execute_readonly_sql)
+    tools/                 # sql_executor
     observability/         # TraceLogger
     retrieval/             # RAG 管线
   corpus/bird_fewshot/     # Few-shot 示例（按 db_id + 方言）
@@ -488,7 +488,6 @@ nl2sql-mini-agent/
   data/bird/mini_dev_data/ # BIRD Mini-Dev 数据集
   llm_keys.json            # LLM 密钥（不提交 Git）
   databases.json           # 用户自定义数据库连接
-  tools/mcp-server-go/     # Go MCP Server (validate_sql + execute_readonly_sql)
   gateway/                 # Go API Gateway (go-chi 限流/反向代理)
 ```
 
