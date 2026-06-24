@@ -8,33 +8,85 @@
 
 ## 架构
 
+### 系统（异步路径）
+
 ```
-                          Streamlit UI / API Client
-                                    │
-                          Go API Gateway (:8080)
-                          限流 · 健康检查 · 反向代理
-                                    │
-                          FastAPI (:8000) ──SSE──→ Kafka ──→ Worker
-                                                          │
-                                                    LangGraph Agent
-                                                          │
-              ┌───────────────────────────────────────────┼──────────────────────┐
-              │                    │                      │                      │
-     Schema Retriever         Generator         Guard (AST + 9 规则)    Semantic Check
-     RAG + DDL 构建      (temp=0 / 多候选)            │                 LLM YES/NO
-              │                    │            通过 ─┴─ 拒绝                 │
-              ▼                    ▼                      │              YES ──┴── NO
-        ChromaDB + bge-small    Voter                    │                      │
-                               (并行执行 +            Voter               Self-Correction
-                                LLM 平票)                 │              (Refiner→Gen)
-                                                      END / Feedback
-              ┌───────────────────────────────────────────┘
-              │
-    MCP Tool Layer ─────────────────────────────┐
-    validate_sql · execute_readonly_sql          │
-    Python (fastmcp) + Go (mcp-go)              │
-              │                                  │
-    PostgreSQL · MySQL · SQLite · ChromaDB · Redis
+  Client (Streamlit UI / API)
+        │
+        │  POST /task/submit    POST /task/{id}/feedback
+        │  GET  /task/{id}/stream (SSE)
+        ▼
+  Go API Gateway (:8080)          限流 · 健康检查 · 反向代理
+        │
+        ▼
+  FastAPI  (:8000) ──────────────────────────────┐
+        │                                         │
+        │  submit ──→ Kafka ──→ Worker            │
+        │  feedback ──→ Kafka ──→ Worker          │
+        │                                         │
+        │  SSE ←── Redis (轮询状态 + Pub/Sub) ◄───┘
+        │
+        │  /query/full/stream: FastAPI 线程内运行 LangGraph
+        │  （同步路径 — 无需 Kafka / Worker）
+        ▼
+  ┌─────────────────────────────────────────────────┐
+  │              LangGraph Agent                     │
+  │                                                  │
+  │  Router → Schema Retriever → Decomposer          │
+  │     → Generator → Guard → Voter → SemCheck       │
+  │     → Refiner（自修复循环）                       │
+  │                                                  │
+  │  Feedback Graph（人工修正）：                     │
+  │     Refiner → Generator → Guard → Voter → SemCheck │
+  │                                                  │
+  │  工具: MCP validate_sql · execute_readonly_sql    │
+  │        Python (fastmcp) + Go (mcp-go)             │
+  └──────────────────┬──────────────────────────────┘
+                     │
+         ┌───────────┼───────────┐
+         ▼           ▼           ▼
+    PostgreSQL   MySQL   SQLite (BIRD 11 数据库)
+         │           │           │
+         └───────────┼───────────┘
+                     ▼
+        ChromaDB (RAG 向量库)    Redis (任务状态 + Token 流)
+```
+
+### 数据流
+
+```
+  ┌──────────┐  submit/feedback  ┌────────┐  消费       ┌────────┐
+  │ FastAPI  │ ────────────────→ │ Kafka  │ ──────────→ │ Worker │
+  │ (:8000)  │                   │ 3.7.1  │             │        │
+  └────┬─────┘                   └────────┘             └───┬────┘
+       │                                                    │
+       │  SSE: Redis 轮询状态 + Pub/Sub Token               │
+       │  ◄─────────────────────────────────────────────────┘
+       │                                                    │
+       ▼                                                    ▼
+  ┌─────────┐                                        ┌─────────┐
+  │ Client  │                                        │  Redis  │
+  │ (SSE)   │                                        │ 状态存储 │
+  └─────────┘                                        │ Token流 │
+                                                     └─────────┘
+```
+
+### 自修复 & 人工反馈
+
+```
+  Generator → Guard → Voter → SemCheck
+      │          │        │         │
+      │  不通过  │ 不通过 │ 不通过  │
+      └──────────┴────────┴─────────┘
+                      │
+                      ▼
+                 Refiner
+                      │
+                      ├── 自动：格式化 Guard/Voter/SemCheck 错误
+                      ├── 人工：格式化 user_feedback + 对话历史
+                      │
+                      ▼
+                 Generator（重试 / 反馈图）
 ```
 
 ## 快速开始
