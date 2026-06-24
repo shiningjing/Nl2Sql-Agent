@@ -76,9 +76,9 @@
                         通过 ─────┴───── 拒绝
                           │                │
                ┌──────────▼──────────┐  ┌──▼──────────┐
-               │        Voter        │  │   Refiner   │
-               │  并行执行 +          │◄─│  错误 →     │
-               │  LLM 平票兜底       │  │  Generator  │
+               │        Voter        │  │   Refiner   │◄── 人工反馈
+               │  并行执行 +          │◄─│  错误 →     │   (POST /task/
+               │  LLM 平票兜底       │  │  Generator  │    {id}/feedback)
                └──────────┬──────────┘  └──▲──────────┘
                           │                │
                  有优胜 ───┴── 无优胜 ─────┘
@@ -93,12 +93,6 @@
                     ┌─────▼─────┐
                     │    END    │
                     └───────────┘
-                          ▲
-                          │
-              人工反馈 (POST /task/{id}/feedback)
-
-  工具: MCP validate_sql · execute_readonly_sql
-        Python (fastmcp) + Go (mcp-go)
 ```
 
 ## 快速开始

@@ -76,9 +76,9 @@ Natural language → SQL end-to-end system. LangGraph state machine orchestrates
                         pass ─────┴───── fail
                           │                │
                ┌──────────▼──────────┐  ┌──▼──────────┐
-               │        Voter        │  │   Refiner   │
-               │  parallel exec +    │◄─│  error →    │
-               │  LLM tiebreak       │  │  Generator  │
+               │        Voter        │  │   Refiner   │◄── Human Feedback
+               │  parallel exec +    │◄─│  error →    │   (POST /task/
+               │  LLM tiebreak       │  │  Generator  │    {id}/feedback)
                └──────────┬──────────┘  └──▲──────────┘
                           │                │
                   winner ─┴── no winner ───┘
@@ -93,12 +93,6 @@ Natural language → SQL end-to-end system. LangGraph state machine orchestrates
                     ┌─────▼─────┐
                     │    END    │
                     └───────────┘
-                          ▲
-                          │
-              Human Feedback (POST /task/{id}/feedback)
-
-  Tools: MCP validate_sql · execute_readonly_sql
-         Python (fastmcp) + Go (mcp-go)
 ```
 
 ## Quick Start
