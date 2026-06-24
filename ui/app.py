@@ -9,7 +9,7 @@ from storage.config import Config
 API_BASE = os.getenv("API_BASE", f"http://127.0.0.1:{Config.API_PORT}")
 USE_STREAMING = True
 
-st.set_page_config(page_title="NL2SQL Agent — BIRD", page_icon=":bird:", layout="wide")
+st.set_page_config(page_title="NL2SQL Agent", page_icon="", layout="wide")
 
 # ── Custom CSS ──
 st.markdown("""
@@ -469,7 +469,8 @@ def render_settings():
     with c_back:
         st.markdown(
             '<style>'
-            '[data-testid="stBaseButton-tertiary"], [data-testid="stBaseButton-tertiary"] * {'
+            '[data-testid="stMainBlockContainer"] [data-testid="stBaseButton-tertiary"], '
+            '[data-testid="stMainBlockContainer"] [data-testid="stBaseButton-tertiary"] * {'
             'font-size:28pt !important; color:#000 !important;'
             'padding:0 !important; line-height:1 !important;'
             'border:none !important; background:transparent !important;'
@@ -581,7 +582,8 @@ def render_query():
     with c_gear:
         st.markdown(
             '<style>'
-            '[data-testid="stBaseButton-tertiary"], [data-testid="stBaseButton-tertiary"] * {'
+            '[data-testid="stMainBlockContainer"] [data-testid="stBaseButton-tertiary"], '
+            '[data-testid="stMainBlockContainer"] [data-testid="stBaseButton-tertiary"] * {'
             'font-size:28pt !important; color:#000 !important;'
             'padding:0 !important; line-height:1 !important;'
             'border:none !important; background:transparent !important;'
@@ -835,7 +837,7 @@ with st.sidebar:
     with col_hist:
         st.subheader("History")
     with col_dots:
-        if st.button("···" if not st.session_state.export_open else "✕", key="export_toggle"):
+        if st.button("···" if not st.session_state.export_open else "✕", key="export_toggle", type="tertiary"):
             st.session_state.export_open = not st.session_state.export_open
             st.rerun()
 
@@ -868,18 +870,19 @@ with st.sidebar:
         for h in reversed(st.session_state.history):
             icon = ":white_check_mark:" if h["status"] == "ok" else ":x:"
             db_tag = f"[{h.get('db_name', '?')}]"
-            label = f"{icon} {db_tag} {h['question'][:35]}{'...' if len(h['question']) > 35 else ''}"
-            col_sel, col_del = st.columns([8, 2])
-            with col_sel:
-                if st.button(label, key=f"hist_{h['idx']}", use_container_width=True):
-                    st.session_state.selected_idx = h["idx"]
-                    st.rerun()
-            with col_del:
-                if st.button("✕", key=f"del_{h['idx']}", use_container_width=True):
-                    st.session_state.history = [x for x in st.session_state.history if x["idx"] != h["idx"]]
-                    if st.session_state.selected_idx == h["idx"]:
-                        st.session_state.selected_idx = None
-                    st.rerun()
+            label = f"{icon} {db_tag} {h['question'][:30]}{'...' if len(h['question']) > 30 else ''}"
+            with st.container(border=True):
+                col_sel, col_del = st.columns([9, 1])
+                with col_sel:
+                    if st.button(label, key=f"hist_{h['idx']}", use_container_width=True, type="tertiary"):
+                        st.session_state.selected_idx = h["idx"]
+                        st.rerun()
+                with col_del:
+                    if st.button("✕", key=f"del_{h['idx']}", type="tertiary"):
+                        st.session_state.history = [x for x in st.session_state.history if x["idx"] != h["idx"]]
+                        if st.session_state.selected_idx == h["idx"]:
+                            st.session_state.selected_idx = None
+                        st.rerun()
 
         if st.session_state.selected_idx is not None:
             sel = next((h for h in st.session_state.history if h["idx"] == st.session_state.selected_idx), None)
