@@ -198,42 +198,45 @@ python -m evaluation.run --test --samples 20 --configs R2
 
 ## BIRD Mini-Dev Results
 
-**Latest**: 100 samples, DeepSeek V4 Pro, Full Graph + RAG. 200 calls, 0 crashes.
+**Latest**: 500 samples, DeepSeek V4 Pro. R4 config (RAG + MultiCandidate + Fewshot + ColumnPrune). 500 calls, 0 crashes.
 
-| Metric | R2_RAG | R5_Evidence |
-|--------|--------|-------------|
-| **EX** | **39.0%** | **43.0%** |
-| VES | 0.49 | 0.43 |
-| Avg Time | 11.6s | 10.9s |
-| Avg Tokens | 16,762 | 15,358 |
-| RAG Table Recall | **98.4%** | 97.9% |
-| Self-Correction Fix Rate | 26.5% | 24.1% |
-| Cost (200 calls) | — | $0.97 (¥7) |
+| Metric | R4_PruneFewshot | R5_EvidenceFeedback |
+|--------|:---------------:|:-------------------:|
+| **EX** | **37.6%** | **42.4%** |
+| VES | 0.40 | — |
+| Avg Time | 14.1s | — |
+| Avg Tokens | 16,284 | — |
+| RAG Table Recall | **97.7%** (480) | — |
+| Self-Correction Fix Rate | 24.4% | — |
+| Evidence Feedback Fixed | — | 24/311 (7.7%) |
+| Cost (500 calls) | $2.47 | — |
 
-### By Difficulty
+*R5_EvidenceFeedback: runs R4 first, then feeds BIRD evidence as user_feedback to feedback graph for EX=0 samples.*
 
-| Config | Simple (37) | Moderate (49) | Challenging (14) |
-|--------|:-----------:|:-------------:|:----------------:|
-| R2_RAG | 46.0% | 34.7% | 35.7% |
-| R5_Evidence | 48.6% | 38.8% | 42.9% |
+### By Difficulty (R4)
 
-### Module Analysis (R2_RAG)
+| Simple (148) | Moderate (250) | Challenging (102) |
+|:------------:|:--------------:|:-----------------:|
+| 50.0% | 36.8% | 21.6% |
+
+### Module Analysis (R4, 500 samples)
 
 | Module | Metric | Value |
 |--------|--------|-------|
-| **Guard** | False Negative Rate | 55.6% (pure syntax, no semantic ability) |
-| **SemCheck** | False Negative Rate | 38.9% (LLM YES but EX=0) |
-| **Self-Correction** | Retry Rate / Fix Rate | 49.0% retried · 26.5% fixed |
-| **Voter** | Single / Multi / Tie | 26 / 4 / 19 (out of 49 retries) |
-| **Decomposer** | Complex EX | 26.7% (30 complex questions) |
+| **Guard** | Reject Rate / FN Rate | 2.5% / 58.5% |
+| **SemCheck** | Reject Rate / FN Rate | 24.1% / 39.7% |
+| **Self-Correction** | Retry Rate / Fix Rate | 53.2% / 24.4% |
+| **Voter** | Multi-candidate / Avg Candidates | 266 / 1.83 |
+| **Decomposer** | Complex EX | 27.5% (149 questions) |
+| **Evidence Feedback** | Attempted / Fixed | 311 / 24 (7.7%) |
 
 ### Key Findings
 
-1. **RAG is the biggest lever** — +11pp over baseline (23.4% → 34.6%)
-2. **Strong model matters** — Claude Opus 4.7 EX 47.0% vs DeepSeek 39.0% (+8pp)
-3. **Decomposer ineffective** for DeepSeek — complex question EX lower than simple
-4. **Self-Correction** fix rate improved from 7-20% to **24-27%**
-5. **Guard** is form-only — 55% of passed SQL still produce wrong results
+1. **RAG is the biggest lever** — +11pp over baseline
+2. **Strong model matters** — Claude Opus 4.7 EX 47.0% vs DeepSeek 39.0% (+8pp, 100 题抽测)
+3. **SemCheck is the top optimization target** — FN 39.7%, reducing it could yield +4-5pp
+4. **Decomposer gap persists** — Complex EX 27.5% vs Simple 50.0% (22.5pp)
+5. **Evidence post-hoc feedback** — feeds evidence as user_feedback, repairs 7.7% → EX 37.6% → 42.4%
 
 ## Tech Stack
 
@@ -243,12 +246,12 @@ python -m evaluation.run --test --samples 20 --configs R2
 | Embedding | BAAI/bge-small-zh-v1.5 (local) |
 | Vector DB | ChromaDB |
 | Orchestration | LangGraph + LangChain |
-| AST Validation | sqlglot (Python) + vitess/sqlparser (Go) |
+| AST Validation | sqlglot (Python) |
 | Databases | SQLite / PostgreSQL 16 / MySQL 8.4 |
 | Cache + State | Redis 7 |
 | Message Queue | Kafka 3.7 (KRaft, no ZooKeeper) |
 | API | FastAPI + Pydantic v2 |
-| MCP Protocol | fastmcp (Python) + mark3labs/mcp-go (Go) |
+| MCP Protocol | fastmcp (Python) |
 | Gateway | go-chi/chi (Go) |
 | Frontend | Streamlit 1.51 |
 | Observability | OpenTelemetry + TraceLogger (jsonl) |
@@ -266,8 +269,6 @@ nl2sql-agent/
   infrastructure/          # broker (Kafka) + task_store (Redis state machine)
   guard/                   # safety_rules (9 rules) + error_types + error_classifier
   tools/
-    mcp/                   # Python MCP tools (validate_sql, execute_readonly_sql)
-    mcp-server-go/         # Go MCP Server (vitess/sqlparser + database/sql)
     sql_executor.py        # SQL execution engine
   gateway/                 # Go API Gateway (go-chi rate-limit + reverse proxy)
   retrieval/               # RAG pipeline (schema + domain + sample rows)

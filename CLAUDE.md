@@ -1,12 +1,22 @@
-# CLAUDE.md — NL2SQL Agent v0.3.0 → DataAgentOps
+# CLAUDE.md — NL2SQL Agent v0.5.5
 
 ## 项目概览
 
 自然语言 → SQL 端到端系统。LangGraph 状态机编排（Router → Schema Retriever → Decomposer → Generator → Guard → Voter → SemCheck → Refiner）。BIRD Mini-Dev（500 题，11 DB，3 方言）消融评测。
 
-**BIRD 结果**：DeepSeek V4 Pro EX **39.0%**（100 题 / RAG）/ **43.0%**（+Evidence）/ Claude Opus 4.7 EX **47.0%**。RAG Table Recall **98.4%**（100 题）。200 次调用 0 crash。
+**BIRD 全量 500 题结果** (2026-06-24)：
 
-**核心发现**：RAG 最大杠杆 (+11pp)；Decomposer 对 DeepSeek 无效；换强模型 +8pp；Self-Correction 修复率 24-27%（较之前 7-20% 提升）。
+| 配置 | EX | 说明 |
+|------|-----|------|
+| R4_PruneFewshot | **37.6%** | 纯 RAG 最高配置（无 evidence），0 crash |
+| R5_EvidenceFeedback | **42.4%** | R4 跑完后对 EX=0 题用 BIRD evidence 做 user_feedback 修复（24/311 修复，+4.8pp） |
+| R2_RAG 100 题参考 | 39.0% | 100 题抽测 |
+| R5_Evidence 100 题参考 | 43.0% | evidence 直接注入 prompt |
+| Claude Opus 4.7 | 47.0% | 100 题抽测 |
+
+RAG Table Recall **97.7%**（500 题）。500 次调用 **0 crash**，成本 **$2.47**。
+
+**核心发现**：RAG 最大杠杆 (+11pp)；Decomposer 对 DeepSeek 无效；换强模型 +8pp；Self-Correction 修复率 24%；SemCheck 是最大优化空间（FN 39.7%）；Evidence 以 post-hoc feedback 方式使用可修复 7.7% 错题。
 
 ## DataAgentOps 升级计划（2026-06 启动，4 周）
 
@@ -505,8 +515,9 @@ nl2sql-mini-agent/
 ## 命令速查
 
 ```bash
-# 评测（测试/完整消融/预计算 gold）
-python -m evaluation.run --test --samples 20 --configs R2,R5
+# 评测（快速测试 / 全量 500 题 / 完整消融 / 预计算 gold）
+python -m evaluation.run --test --samples 20 --configs R4
+python -m evaluation.run --test --samples 500 --configs R5 --max-workers 8  # 全量 + Evidence Feedback
 python -m evaluation.run --exp ablation --max-workers 8
 python -m evaluation.precompute_gold
 
@@ -517,12 +528,14 @@ python tests/smoke_multidb.py
 python scripts/ingest_bird.py
 ```
 
-## 已知瓶颈 (2026-06-21 100 题 benchmark 更新)
+## 已知瓶颈 (2026-06-24 全量 500 题 R4 配置)
 
-1. **Self-Correction 修复率 24-27%** — 较之前 7-20% 提升，但仍有 70%+ 重试无法修复
-2. **SemCheck FN 率 34-39%** — 较之前 50-65% 明显改善，但 1/3 的 YES→EX=0 仍需解决
-3. **Guard FN 率 55-56%** — 纯形式校验无语义能力，方向：关键词→语法要求映射
-4. ~~Generator 时间占比 50%+ — 多候选时翻倍~~ → W2 已修复：正常路径单条 temp=0，仅 Self-Correction 走多候选
+1. **SemCheck FN 率 39.7%** — 186/468 题 LLM 判 YES 但 EX=0，最大优化空间（修复可带来 +4-5pp）
+2. **Self-Correction 修复率 24.4%** — 266 题重试只修了 65 题，Refiner 错误格式化质量是瓶颈
+3. **Guard FN 率 58.5%** — 纯形式校验无语义能力，468 通过中 281 实际错误
+4. **Decomposer 复杂题 EX 27.5%** vs 简单题 44.4% — 17pp 差距，对 DeepSeek 拆解可能反效果
+5. **Voter 候选多样性不足** — 多候选去重后 145/266 只剩 1 个，不同 temp 产出高度相似
+6. **Evidence Feedback 修复率 7.7%** — post-hoc evidence 作为 user_feedback 效果有限，24/311 修复 → EX 42.4%
 
 ## Redis 连接策略
 

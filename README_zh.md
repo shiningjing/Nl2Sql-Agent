@@ -197,42 +197,45 @@ python -m evaluation.run --test --samples 20 --configs R2
 
 ## BIRD Mini-Dev 评测结果
 
-**最新**: 100 题，DeepSeek V4 Pro，Full Graph + RAG。200 次调用 0 crash。
+**最新**: 500 题全量，DeepSeek V4 Pro，R4 配置（RAG + MultiCandidate + Fewshot + ColumnPrune）。500 次调用 0 crash。
 
-| 指标 | R2_RAG | R5_Evidence |
-|------|--------|-------------|
-| **EX** | **39.0%** | **43.0%** |
-| VES | 0.49 | 0.43 |
-| 平均耗时 | 11.6s | 10.9s |
-| 平均 Token | 16,762 | 15,358 |
-| RAG 表召回 | **98.4%** | 97.9% |
-| Self-Correction 修复率 | 26.5% | 24.1% |
-| 成本（200 次） | — | $0.97（¥7） |
+| 指标 | R4_PruneFewshot | R5_EvidenceFeedback |
+|------|:---------------:|:-------------------:|
+| **EX** | **37.6%** | **42.4%** |
+| VES | 0.40 | — |
+| 平均耗时 | 14.1s | — |
+| 平均 Token | 16,284 | — |
+| RAG 表召回 | **97.7%** (480) | — |
+| Self-Correction 修复率 | 24.4% | — |
+| Evidence Feedback 修复 | — | 24/311 (7.7%) |
+| 成本（500 次） | $2.47 | — |
 
-### 按难度分层
+*R5_EvidenceFeedback: 先用 R4 跑，对 EX=0 的题目把 BIRD evidence 当作 user_feedback 通过 feedback graph 修复。*
 
-| 配置 | 简单 (37) | 中等 (49) | 困难 (14) |
-|------|:---------:|:---------:|:---------:|
-| R2_RAG | 46.0% | 34.7% | 35.7% |
-| R5_Evidence | 48.6% | 38.8% | 42.9% |
+### 按难度分层 (R4)
 
-### 模块分析（R2_RAG）
+| 简单 (148) | 中等 (250) | 困难 (102) |
+|:----------:|:----------:|:----------:|
+| 50.0% | 36.8% | 21.6% |
+
+### 模块分析 (R4, 500 题)
 
 | 模块 | 指标 | 数值 |
 |------|------|------|
-| **Guard** | 假阴性率 | 55.6%（纯形式校验，无语义能力） |
-| **SemCheck** | 假阴性率 | 38.9%（LLM 判 YES 但 EX=0） |
-| **Self-Correction** | 重试率 / 修复率 | 49.0% 重试 · 26.5% 修复 |
-| **Voter** | 单候选 / 多候选 / 平票 | 26 / 4 / 19（共 49 次重试） |
-| **Decomposer** | 复杂题 EX | 26.7%（30 道复杂题） |
+| **Guard** | 拒绝率 / 假阴性率 | 2.5% / 58.5% |
+| **SemCheck** | 拒绝率 / 假阴性率 | 24.1% / 39.7% |
+| **Self-Correction** | 重试率 / 修复率 | 53.2% / 24.4% |
+| **Voter** | 多候选 / 平均候选 | 266 / 1.83 |
+| **Decomposer** | 复杂题 EX | 27.5% (149 题) |
+| **Evidence Feedback** | 尝试 / 修复 | 311 / 24 (7.7%) |
 
 ### 核心发现
 
-1. **RAG 是最大杠杆** — 较基线提升 +11pp（23.4% → 34.6%）
-2. **强模型效果显著** — Claude Opus 4.7 EX 47.0% vs DeepSeek 39.0%（+8pp）
-3. **Decomposer 对 DeepSeek 无效** — 复杂题 EX 低于简单题
-4. **Self-Correction** 修复率从 7-20% 提升至 **24-27%**
-5. **Guard 是形式校验** — 55% 通过的 SQL 仍然产生错误结果
+1. **RAG 是最大杠杆** — 较基线提升 +11pp
+2. **强模型效果显著** — Claude Opus 4.7 EX 47.0% vs DeepSeek 39.0%（+8pp，100 题抽测）
+3. **SemCheck 是最大优化机会** — FN 39.7%，降低可带来 +4-5pp
+4. **Decomposer 差距依旧** — 复杂题 EX 27.5% vs 简单题 50.0%（22.5pp）
+5. **Evidence post-hoc 反馈** — evidence 作为 user_feedback 修复 7.7% → EX 37.6% → 42.4%
 
 ## 技术栈
 
@@ -242,12 +245,12 @@ python -m evaluation.run --test --samples 20 --configs R2
 | Embedding | BAAI/bge-small-zh-v1.5（本地） |
 | 向量库 | ChromaDB |
 | 编排 | LangGraph + LangChain |
-| AST 校验 | sqlglot (Python) + vitess/sqlparser (Go) |
+| AST 校验 | sqlglot (Python) |
 | 数据库 | SQLite / PostgreSQL 16 / MySQL 8.4 |
 | 缓存+状态 | Redis 7 |
 | 消息队列 | Kafka 3.7（KRaft 模式，无需 ZooKeeper） |
 | API | FastAPI + Pydantic v2 |
-| MCP 协议 | fastmcp (Python) + mark3labs/mcp-go (Go) |
+| MCP 协议 | fastmcp (Python) |
 | 网关 | go-chi/chi (Go) |
 | 前端 | Streamlit 1.51 |
 | 可观测 | OpenTelemetry + TraceLogger (jsonl) |
@@ -265,8 +268,6 @@ nl2sql-agent/
   infrastructure/          # broker (Kafka) + task_store (Redis 状态机)
   guard/                   # safety_rules (9 规则) + error_types + error_classifier
   tools/
-    mcp/                   # Python MCP 工具 (validate_sql, execute_readonly_sql)
-    mcp-server-go/         # Go MCP Server (vitess/sqlparser + database/sql)
     sql_executor.py        # SQL 执行引擎
   gateway/                 # Go API 网关 (go-chi 限流 + 反向代理)
   retrieval/               # RAG 管线 (schema + domain + sample rows)
