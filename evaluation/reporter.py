@@ -25,6 +25,7 @@ _CSV_COLUMNS = [
     "retry_count", "candidate_count",
     "decomposer_used", "sub_question_count",
     "rag_recall",
+    "feedback_ex", "feedback_fixed", "feedback_sql",
     "trace_id", "last_graph_node",
 ]
 
@@ -58,6 +59,9 @@ def _flatten_case(r: dict) -> dict:
         "decomposer_used": r.get("decomposer_used", False),
         "sub_question_count": r.get("sub_question_count", 0),
         "rag_recall": r.get("rag_recall"),
+        "feedback_ex": r.get("feedback_ex"),
+        "feedback_fixed": r.get("feedback_fixed"),
+        "feedback_sql": r.get("feedback_sql", ""),
         "trace_id": r.get("trace_id", ""),
         "last_graph_node": r.get("last_graph_node", ""),
     }
@@ -232,6 +236,20 @@ def _write_pipeline_md(f, results: dict, config_names: list[str]):
             nt = results[name].get("pipeline_stats", {}).get("node_timing_avg", {})
             vals = [f"{nt.get(n, 0):.1f}s" for n in sorted_nodes]
             f.write(f"| {name} | " + " | ".join(vals) + " |\n")
+
+    # Evidence Feedback
+    has_fb = any(results[n].get("fb_attempted", 0) > 0 for n in config_names)
+    if has_fb:
+        f.write("\n## Evidence Feedback (EX=0 → BIRD Evidence as User Feedback)\n\n")
+        f.write("| Config | Attempted | Fixed | Fix Rate | EX Before | EX After |\n")
+        f.write("|--------|-----------|-------|----------|-----------|----------|\n")
+        for name in config_names:
+            fb_a = results[name].get("fb_attempted", 0)
+            if fb_a > 0:
+                f.write(f"| {name} | {fb_a} | {results[name].get('fb_fixed', 0)} | "
+                        f"{results[name].get('fb_fix_rate', 0):.1%} | "
+                        f"{results[name].get('fb_pre_ex', 0):.1%} | "
+                        f"{results[name].get('fb_post_ex', 0):.1%} |\n")
 
     # RAG Table Recall
     has_rag = any(results[n].get("avg_rag_recall") is not None for n in config_names)

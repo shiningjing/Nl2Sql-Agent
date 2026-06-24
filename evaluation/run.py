@@ -230,12 +230,13 @@ def _default_configs() -> list[dict]:
          "multi_candidate": True, "rag_column_prune": True, "fewshot_enabled": True,
          "decomposer_enabled": True,
          "use_full_graph": True},
-        {"name": "R5_Evidence",
+        {"name": "R5_EvidenceFeedback",
          "rag_schema": True, "rag_domain": True, "sample_rows": True,
          "multi_candidate": True, "rag_column_prune": True, "fewshot_enabled": True,
          "decomposer_enabled": True,
          "use_full_graph": True,
-         "knowledge_source": "evidence"},
+         "evidence_feedback": True,
+         "desc": "R4 → evidence as user_feedback on EX=0 samples"},
     ]
 
 
@@ -336,6 +337,54 @@ def evaluate_bird_sample(sample, config: dict, knowledge_source: str, data_dir: 
     ex = ex_info["ex"]
     v = ves_score(ex, ex_info["gold_time_ms"], ex_info["gen_time_ms"])
 
+    # ── Evidence Feedback (R5_EvidenceFeedback): EX=0 → feed evidence as user_feedback ──
+    feedback_ex = None
+    feedback_sql = ""
+    feedback_fixed = False
+    feedback_detail = ""
+    if config.get("evidence_feedback") and ex is False:
+        evidence = (sample.evidence or "").strip()
+        if evidence:
+            try:
+                from agent.graphs.feedback_graph import create_feedback_graph
+                fb_graph = create_feedback_graph()
+                fb_state = fb_graph.invoke({
+                    "question": sample.question,
+                    "db_id": sample.db_id,
+                    "database_url": database_url,
+                    "user_feedback": evidence,
+                    "is_feedback_round": True,
+                    "schema_text": state.get("schema_text", ""),
+                    "notes_text": state.get("notes_text", ""),
+                    "fewshot_text": state.get("fewshot_text", ""),
+                    "sql": gen_sql,
+                    "last_sql": gen_sql,
+                    "exec_result": state.get("exec_result"),
+                    "retry_count": 0,
+                    "max_retries": 1,
+                    "rag_schema": True,
+                    "rag_domain": True,
+                    "fewshot_enabled": True,
+                    "multi_candidate": True,
+                    "tlog": tlog,
+                })
+                fb_sql = fb_state.get("sql", "") or fb_state.get("chosen_sql", "")
+                if fb_sql:
+                    feedback_sql = fb_sql
+                    fb_ex_info = exec_match(sample.gold_sql, fb_sql,
+                                            database_url=database_url,
+                                            gold_cache=gold_entry)
+                    feedback_ex = fb_ex_info["ex"]
+                    feedback_fixed = feedback_ex is True
+                    feedback_detail = fb_ex_info.get("detail", "")
+                else:
+                    feedback_ex = False
+                    feedback_detail = "Evidence feedback produced no SQL"
+            except Exception as fb_e:
+                feedback_ex = False
+                feedback_detail = f"{type(fb_e).__name__}: {str(fb_e)[:150]}"
+            t2 = time.time()  # update execmatch end time
+
     # ── Pipeline module stats (harvested from state after graph invoke) ──
     guard_pass = state.get("guard_pass")
     guard_issues = state.get("guard_issues", [])
@@ -384,6 +433,11 @@ def evaluate_bird_sample(sample, config: dict, knowledge_source: str, data_dir: 
         # ── RAG recall ──
         "rag_recall": rag_recall_info["recall"] if rag_recall_info else None,
         "rag_recall_detail": rag_recall_info,
+        # ── Evidence feedback ──
+        "feedback_ex": feedback_ex,
+        "feedback_sql": feedback_sql[:300] if feedback_sql else "",
+        "feedback_fixed": feedback_fixed,
+        "feedback_detail": feedback_detail,
     }
 
 
@@ -797,6 +851,14 @@ def run_bird_eval(
             _write_timeout_log(timeout_log, cfg_name, cfg_knowledge)
 
         avg_rag_recall = round(rag_recall_sum / rag_recall_count, 4) if rag_recall_count else None
+
+        # ── Evidence Feedback stats ──
+        fb_attempted = sum(1 for r in case_results if r.get("feedback_ex") is not None)
+        fb_fixed = sum(1 for r in case_results if r.get("feedback_fixed") is True)
+        fb_fix_rate = round(fb_fixed / fb_attempted, 4) if fb_attempted else 0
+        fb_pre_ex = round(passed / n, 4) if n else 0
+        fb_post_ex = round((passed + fb_fixed) / n, 4) if n else 0
+
         all_results[cfg_name] = {
             "config": cfg,
             "knowledge_source": cfg_knowledge,
@@ -816,6 +878,12 @@ def run_bird_eval(
             "pipeline_stats": pipeline_stats,
             "avg_rag_recall": avg_rag_recall,
             "rag_recall_samples": rag_recall_count,
+            # ── Evidence Feedback ──
+            "fb_attempted": fb_attempted,
+            "fb_fixed": fb_fixed,
+            "fb_fix_rate": fb_fix_rate,
+            "fb_pre_ex": fb_pre_ex,
+            "fb_post_ex": fb_post_ex,
         }
 
         ex_pct = all_results[cfg_name]["ex_rate"]
@@ -848,6 +916,10 @@ def run_bird_eval(
         if dc.get("used", 0) > 0:
             print(f"  Decomposer: {dc['used']} samples, EX={dc['ex_rate']:.1%}"
                   f"  |  avg {dc['avg_sub_questions']} sub-questions")
+        # ── Evidence Feedback summary ──
+        if fb_attempted > 0:
+            print(f"  Evidence Feedback: {fb_fixed}/{fb_attempted} fixed ({fb_fix_rate:.1%})"
+                  f"  |  EX {fb_pre_ex:.1%} → {fb_post_ex:.1%}")
         # ── Print timing split (graph vs exec_match) ──
         timings = [(r.get("elapsed_graph_s", 0), r.get("elapsed_execmatch_s", 0),
                      r.get("last_graph_node", "?"))
