@@ -100,8 +100,16 @@ def get_bird_collection():
     return _bird_collection
 
 
-def retrieve_bird(question: str, db_id: str, k: int = 6) -> list[dict]:
-    """Search BIRD collection for domain knowledge, filtered to one database."""
+def retrieve_bird(question: str, db_id: str, k: int = 6,
+                  hybrid: bool = False) -> list[dict]:
+    """Search BIRD collection for domain knowledge, filtered to one database.
+
+    When hybrid=True, uses semantic + BM25 -> RRF merge.
+    """
+    if hybrid:
+        from retrieval.hybrid_search import hybrid_retrieve
+        return hybrid_retrieve(question, db_id, k=k)
+
     col = get_bird_collection()
     results = col.query(
         query_texts=[question],

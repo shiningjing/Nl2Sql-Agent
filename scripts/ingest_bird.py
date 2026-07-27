@@ -147,6 +147,14 @@ def build_bird_index(data_dir: str | None = None) -> int:
         )
 
     print(f"Indexed {len(chunks)} chunks from {len(os.listdir(db_dir))} databases into 'bird_minidev'")
+
+    try:
+        from retrieval.hybrid_search import rebuild_hybrid_index
+        rebuild_hybrid_index()
+        print("Hybrid BM25 index rebuilt.")
+    except Exception:
+        pass
+
     return len(chunks)
 
 

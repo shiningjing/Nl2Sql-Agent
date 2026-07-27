@@ -57,6 +57,7 @@ def schema_retriever_node(state: AgentState) -> dict:
 
     rag_schema = state.get("rag_schema", True)
     rag_domain = state.get("rag_domain", True)
+    rag_hybrid = state.get("rag_hybrid", False)
     skip_schema = state.get("skip_schema", False)
     k = state.get("rag_k", 8)
     use_fk_expand = state.get("rag_fk_expand", True)
@@ -71,7 +72,8 @@ def schema_retriever_node(state: AgentState) -> dict:
     if rag_schema or rag_domain:
         if not db_id:
             raise ValueError("rag_schema/rag_domain requested but no db_id provided — schema_retriever needs db_id to query bird_minidev")
-        rag_chunks = retrieve_bird(question, db_id, k=k)
+        rag_chunks = retrieve_bird(question, db_id, k=k,
+                                   hybrid=rag_hybrid)
 
     if rag_chunks:
         ctx = build_prompt_context(rag_chunks)
