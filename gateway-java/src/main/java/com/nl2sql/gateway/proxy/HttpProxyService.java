@@ -30,6 +30,7 @@ public class HttpProxyService {
     public HttpProxyService(ProxyProperties props) {
         this.props = props;
         this.httpClient = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)   // h11 (uvicorn) 拒绝 h2c 升级请求
                 .connectTimeout(Duration.ofMillis(props.connectTimeoutMs()))
                 .build();
     }

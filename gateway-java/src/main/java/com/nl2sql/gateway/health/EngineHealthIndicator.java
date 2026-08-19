@@ -21,6 +21,7 @@ public class EngineHealthIndicator implements HealthIndicator {
     public EngineHealthIndicator(ProxyProperties props) {
         this.props = props;
         this.httpClient = HttpClient.newBuilder()
+                .version(java.net.http.HttpClient.Version.HTTP_1_1)
                 .connectTimeout(Duration.ofMillis(props.connectTimeoutMs()))
                 .build();
     }
