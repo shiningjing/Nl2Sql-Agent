@@ -1,0 +1,41 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: gateway-java
+  threads:
+    virtual:
+      enabled: true
+
+engine:
+  base-url: ${ENGINE_BASE_URL:http://127.0.0.1:8000}
+  health-path: /api/v1/health
+  connect-timeout-ms: 3000
+  response-timeout-ms: 180000   # LLM 长流水线，超时交给 TimeLimiter 而不是连接层
+
+management:
+  endpoints:
+    web:
+      base-path: /
+      exposure:
+        include: health,prometheus
+      path-mapping:
+        prometheus: metrics
+  endpoint:
+    health:
+      show-details: always
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      engine:
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+        permittedNumberOfCallsInHalfOpenState: 3
+  timelimiter:
+    instances:
+      engine:
+        timeoutDuration: 180s
+        cancelRunningFuture: true
