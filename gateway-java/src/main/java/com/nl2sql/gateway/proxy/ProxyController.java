@@ -1,5 +1,6 @@
 package com.nl2sql.gateway.proxy;
 
+import com.nl2sql.gateway.web.TraceIdFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -27,14 +28,44 @@ public class ProxyController {
             throws IOException, InterruptedException {
         byte[] body = rawBody.readAllBytes();
         if (request.getRequestURI().endsWith("/stream")) {
-            // Task 5 实现流式分支
-            response.setStatus(501);
-            response.setContentType("application/json");
-            response.getWriter().write("{\"error\":\"stream proxy not implemented yet\"}");
+            streamToClient(request, response, body);
             return;
         }
         EngineResponse resp = proxyService.forward(request, body);
         writeEngineResponse(resp, response);
+    }
+
+    /** SSE 流式透传：响应头直接落地，之后字节边读边 flush，绝不攒批。 */
+    private void streamToClient(jakarta.servlet.http.HttpServletRequest request,
+                                HttpServletResponse response, byte[] body)
+            throws IOException, InterruptedException {
+        java.net.http.HttpResponse<InputStream> engineResp;
+        try {
+            engineResp = proxyService.forwardStream(request, body);
+        } catch (IOException e) {
+            writeUnavailable(request, response, "engine connect failed");
+            return;
+        }
+        response.setStatus(engineResp.statusCode());
+        response.setContentType(engineResp.headers().firstValue("Content-Type")
+                .orElse("application/octet-stream"));
+        try (InputStream in = engineResp.body();
+             OutputStream out = response.getOutputStream()) {
+            byte[] buf = new byte[4096];
+            int n;
+            while ((n = in.read(buf)) != -1) {
+                out.write(buf, 0, n);
+                out.flush();
+            }
+        }
+    }
+
+    private void writeUnavailable(jakarta.servlet.http.HttpServletRequest request,
+                                  HttpServletResponse response, String detail) throws IOException {
+        response.setStatus(503);
+        response.setContentType("application/json");
+        response.getWriter().write("{\"error\":\"engine unavailable\",\"detail\":\"" + detail
+                + "\",\"traceId\":\"" + request.getAttribute(TraceIdFilter.TRACE_ATTR) + "\"}");
     }
 
     private void writeEngineResponse(EngineResponse resp, HttpServletResponse response) throws IOException {
