@@ -16,7 +16,7 @@
         │  POST /task/submit    POST /task/{id}/feedback
         │  GET  /task/{id}/stream (SSE)
         ▼
-  Go API Gateway (:8080)          限流 · 健康检查 · 反向代理
+  Spring Gateway (:8080)          代理 · 熔断降级 · 健康检查 · 指标
         │
         ▼
   FastAPI  (:8000) ──────────────────────────────┐
@@ -149,7 +149,7 @@ python -m evaluation.run --test --samples 20 --configs R2
 | **Human Feedback** | 多轮自然语言修正（上限 10 轮），完整对话历史持久化 Redis |
 | **SSE 流式** | Redis Pub/Sub 实时 token 推送 + Server-Sent Events |
 | **异步任务** | Kafka 提交任务 → Worker 消费 → Redis 状态机（PENDING→RUNNING→SUCCESS/FAILED/TIMEOUT/CANCELLED） |
-| **Go API 网关** | go-chi 路由 · 滑动窗口限流（100 req/min/IP）· 聚合健康检查 · 结构化日志 |
+| **Spring 网关** | Java 21 / Spring Boot 3.3（虚拟线程）· /api/v1 透明代理 · SSE 流式透传 · Resilience4j 超时熔断 · traceId 贯穿 · Prometheus /metrics |
 | **Go MCP Server** | vitess/sqlparser AST 校验 · database/sql 连接池 · 正则+AST 双重校验 · LIMIT 自动包装 · 语句超时 |
 | **多数据库** | SQLite / MySQL / PostgreSQL。方言自动识别 + 方言专属 Few-shot |
 | **多模型** | DeepSeek V4 Pro / GPT-4o / Claude Opus 4.7 / 自定义。自动识别 Anthropic → ChatAnthropic |
@@ -251,7 +251,7 @@ python -m evaluation.run --test --samples 20 --configs R2
 | 消息队列 | Kafka 3.7（KRaft 模式，无需 ZooKeeper） |
 | API | FastAPI + Pydantic v2 |
 | MCP 协议 | fastmcp (Python) |
-| 网关 | go-chi/chi (Go) |
+| 网关 | Spring Boot 3.3 / Java 21 |
 | 前端 | Streamlit 1.51 |
 | 可观测 | OpenTelemetry + TraceLogger (jsonl) |
 | 部署 | Docker Compose（6 服务） |
@@ -269,7 +269,8 @@ nl2sql-agent/
   guard/                   # safety_rules (9 规则) + error_types + error_classifier
   tools/
     sql_executor.py        # SQL 执行引擎
-  gateway/                 # Go API 网关 (go-chi 限流 + 反向代理)
+  gateway-java/            # Spring 网关 (代理 + 熔断 + 指标)
+  gateway/                 # [M1 已退役] Go 网关, 仅为参照保留, M4 后删除
   retrieval/               # RAG 管线 (schema + domain + sample rows)
   observability/           # TraceLogger + OTel 桥接
   evaluation/              # BIRD 评测运行器

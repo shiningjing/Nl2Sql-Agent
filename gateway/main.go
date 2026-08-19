@@ -1,5 +1,7 @@
 package main
 
+// DEPRECATED (M1, 2026-08): 已被 gateway-java (Spring Boot) 替代，仅为参照保留，M4 后删除。
+
 import (
 	"log"
 	"net/http"

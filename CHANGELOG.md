@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.6.0 — M1: Java 网关上线 (2026-08-19)
+
+- Spring Boot 3.3 + JDK 21（虚拟线程）替换 Go 网关接管 :8080，Go 网关退役（目录保留至 M4 后删除）
+- `/api/v1/**` 透明代理（方法/路径/查询串/头/body/状态全透传）+ `X-Trace-Id` 贯穿
+- `/stream` 端点 SSE 流式透传（边读边 flush，长连接不走熔断）
+- Resilience4j：非流式路径超时（TimeLimiter）+ 熔断（CircuitBreaker），引擎故障快速 503（实测 21ms）
+- actuator `/health` 聚合引擎状态 + Prometheus `/metrics`
+- docker-compose 集成 `gateway-java` 服务（多阶段构建，宿主机无需 JDK）；16 个测试全绿
+- 设计文档: `docs/superpowers/specs/2026-08-19-java-task-gateway-design.md`
+
 ## v0.4.x — W4: 部署 + Go 工具 + UI (2026-06-22 → 2026-06-24)
 
 - **v0.4.6** — 移除 Thinking process expander，直接展示 SQL/Results/Trace

@@ -16,7 +16,7 @@ Natural language → SQL end-to-end system. LangGraph state machine orchestrates
         │  POST /task/submit    POST /task/{id}/feedback
         │  GET  /task/{id}/stream (SSE)
         ▼
-  Go API Gateway (:8080)          rate-limit · health · reverse-proxy
+  Spring Gateway (:8080)          proxy · circuit-breaker · health · metrics
         │
         ▼
   FastAPI  (:8000) ──────────────────────────────┐
@@ -150,7 +150,7 @@ python -m evaluation.run --test --samples 20 --configs R2
 | **Human Feedback** | Multi-turn natural language correction (up to 10 rounds). Full conversation history persisted |
 | **SSE Streaming** | Real-time token streaming via Redis Pub/Sub + Server-Sent Events |
 | **Async Tasks** | Kafka task submission → Worker consumption → Redis state machine (PENDING→RUNNING→SUCCESS/FAILED/TIMEOUT/CANCELLED) |
-| **Go API Gateway** | go-chi HTTP router · sliding-window rate limit (100 req/min/IP) · health aggregation · structured logging |
+| **Spring Gateway** | Java 21 / Spring Boot 3.3 (virtual threads) · /api/v1 transparent proxy · SSE streaming passthrough · Resilience4j timeout + circuit breaker · traceId propagation · Prometheus /metrics |
 | **Go MCP Server** | vitess/sqlparser AST validation · database/sql connection pool · dual check (regex + AST) · LIMIT auto-wrap · statement timeout |
 | **Multi-Database** | SQLite / MySQL / PostgreSQL. Dialect auto-detection + dialect-specific few-shot |
 | **Multi-Model** | DeepSeek V4 Pro / GPT-4o / Claude Opus 4.7 / Custom. Auto-detect Anthropic → ChatAnthropic |
@@ -252,7 +252,7 @@ python -m evaluation.run --test --samples 20 --configs R2
 | Message Queue | Kafka 3.7 (KRaft, no ZooKeeper) |
 | API | FastAPI + Pydantic v2 |
 | MCP Protocol | fastmcp (Python) |
-| Gateway | go-chi/chi (Go) |
+| Gateway | Spring Boot 3.3 / Java 21 |
 | Frontend | Streamlit 1.51 |
 | Observability | OpenTelemetry + TraceLogger (jsonl) |
 | Deployment | Docker Compose (6 services) |
@@ -270,7 +270,8 @@ nl2sql-agent/
   guard/                   # safety_rules (9 rules) + error_types + error_classifier
   tools/
     sql_executor.py        # SQL execution engine
-  gateway/                 # Go API Gateway (go-chi rate-limit + reverse proxy)
+  gateway-java/            # Spring Gateway (proxy + circuit breaker + metrics)
+  gateway/                 # [DEPRECATED M1] Go 网关, 仅为参照保留, M4 后删除
   retrieval/               # RAG pipeline (schema + domain + sample rows)
   observability/           # TraceLogger + OTel bridge
   evaluation/              # BIRD evaluation runner
