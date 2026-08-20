@@ -22,10 +22,13 @@ public class TaskController {
 
     private final TaskStoreService store;
     private final KafkaPublisher publisher;
+    private final TaskStreamService streamService;
 
-    public TaskController(TaskStoreService store, KafkaPublisher publisher) {
+    public TaskController(TaskStoreService store, KafkaPublisher publisher,
+                          TaskStreamService streamService) {
         this.store = store;
         this.publisher = publisher;
+        this.streamService = streamService;
     }
 
     public record SubmitRequest(
@@ -177,6 +180,36 @@ public class TaskController {
         body.put("status", "accepted");
         body.put("turn", turn);
         return ResponseEntity.accepted().body(body);
+    }
+
+    /** SSE 流：token 实时 + 状态轮询，事件序列复刻 task_stream；5 分钟上限。 */
+    @GetMapping("/{task_id}/stream")
+    public void stream(@PathVariable("task_id") String taskId,
+                       jakarta.servlet.http.HttpServletResponse response) throws Exception {
+        response.setContentType("text/event-stream");
+        response.setCharacterEncoding("UTF-8");
+        response.setHeader("X-Accel-Buffering", "no");
+        TaskStreamService.EventCursor cursor = new TaskStreamService.EventCursor();
+        long deadline = System.currentTimeMillis() + 300_000;
+        try (var sub = streamService.subscribeTokens(taskId, cursor.tokens);
+             var out = response.getOutputStream()) {
+            while (System.currentTimeMillis() < deadline) {
+                TaskStreamService.SseEvent ev = streamService.nextEvent(taskId, cursor);
+                if (ev == null) {
+                    continue;
+                }
+                out.write(("event: " + ev.event() + "\ndata: " + ev.data() + "\n\n")
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                out.flush();
+                if ("complete".equals(ev.event()) || "error".equals(ev.event())) {
+                    return;
+                }
+            }
+            out.write(("event: timeout\ndata: " + streamService.json(
+                    java.util.Map.of("error", "Stream timeout (5 min)")) + "\n\n")
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            out.flush();
+        }
     }
 
     private static ResponseEntity<Map<String, String>> notFound() {

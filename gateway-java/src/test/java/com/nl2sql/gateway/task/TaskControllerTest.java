@@ -31,6 +31,8 @@ class TaskControllerTest {
     TaskStoreService store;
     @MockBean
     KafkaPublisher publisher;
+    @MockBean
+    TaskStreamService streamService;
 
     @Test
     void submitReturns202WithTaskId() throws Exception {

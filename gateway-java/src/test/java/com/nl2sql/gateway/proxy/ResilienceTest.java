@@ -50,7 +50,7 @@ class ResilienceTest {
     @Test
     void engineDisconnectReturns503() {
         engine.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START));
-        ResponseEntity<String> resp = rest.getForEntity("/api/v1/task/t9/status", String.class);
+        ResponseEntity<String> resp = rest.getForEntity("/api/v1/query/t9-status", String.class);
         assertThat(resp.getStatusCode().value()).isEqualTo(503);
         assertThat(resp.getBody()).contains("engine unavailable");
     }
@@ -61,14 +61,14 @@ class ResilienceTest {
         // 6 次连接失败（窗口 4、阈值 50% → 达到 OPEN）
         for (int i = 0; i < 6; i++) {
             engine.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START));
-            rest.getForEntity("/api/v1/task/t9/status", String.class);
+            rest.getForEntity("/api/v1/query/t9-status", String.class);
         }
         assertThat(breaker.getState()).isEqualTo(CircuitBreaker.State.OPEN);
 
         // OPEN 后快速失败：不等连接超时直接 503
         // （注：不用引擎请求计数证明——JDK HttpClient 对被重置的 GET 有透明重试，计数不可靠）
         long start = System.nanoTime();
-        ResponseEntity<String> fast = rest.getForEntity("/api/v1/task/t9/status", String.class);
+        ResponseEntity<String> fast = rest.getForEntity("/api/v1/query/t9-status", String.class);
         long elapsedMs = (System.nanoTime() - start) / 1_000_000;
         assertThat(fast.getStatusCode().value()).isEqualTo(503);
         assertThat(fast.getBody()).contains("circuit breaker open");
@@ -79,7 +79,7 @@ class ResilienceTest {
     void slowEngineTimesOut() {
         engine.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE));
         long start = System.nanoTime();
-        ResponseEntity<String> resp = rest.getForEntity("/api/v1/task/t8/status", String.class);
+        ResponseEntity<String> resp = rest.getForEntity("/api/v1/query/t8-status", String.class);
         long elapsedMs = (System.nanoTime() - start) / 1_000_000;
         assertThat(resp.getStatusCode().value()).isEqualTo(503);
         assertThat(elapsedMs).isLessThan(5000); // 800ms TimeLimiter + 余量

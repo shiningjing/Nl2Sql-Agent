@@ -45,7 +45,7 @@ class ProxyControllerTest {
         headers.set("X-User-Id", "bench_u01");
         headers.set("Content-Type", "application/json");
 
-        ResponseEntity<String> resp = rest.exchange("/api/v1/task/submit", HttpMethod.POST,
+        ResponseEntity<String> resp = rest.exchange("/api/v1/query", HttpMethod.POST,
                 new HttpEntity<>("{\"question\":\"q\"}", headers), String.class);
 
         assertThat(resp.getStatusCode().value()).isEqualTo(202);
@@ -53,7 +53,7 @@ class ProxyControllerTest {
 
         RecordedRequest recorded = engine.takeRequest();
         assertThat(recorded.getMethod()).isEqualTo("POST");
-        assertThat(recorded.getPath()).isEqualTo("/api/v1/task/submit");
+        assertThat(recorded.getPath()).isEqualTo("/api/v1/query");
         assertThat(recorded.getHeader("X-User-Id")).isEqualTo("bench_u01");
         assertThat(recorded.getHeader("X-Trace-Id")).isNotBlank();
         assertThat(recorded.getBody().readUtf8()).isEqualTo("{\"question\":\"q\"}");
@@ -62,9 +62,9 @@ class ProxyControllerTest {
     @Test
     void proxiesGetWithQueryString() throws Exception {
         engine.enqueue(new MockResponse().setBody("[]"));
-        ResponseEntity<String> resp = rest.getForEntity("/api/v1/task/abc/status?verbose=1", String.class);
+        ResponseEntity<String> resp = rest.getForEntity("/api/v1/databases?verbose=1", String.class);
         assertThat(resp.getBody()).isEqualTo("[]");
-        assertThat(engine.takeRequest().getPath()).isEqualTo("/api/v1/task/abc/status?verbose=1");
+        assertThat(engine.takeRequest().getPath()).isEqualTo("/api/v1/databases?verbose=1");
     }
 
     @Test
