@@ -1,39 +1,19 @@
 package com.nl2sql.gateway.proxy;
 
+import com.nl2sql.gateway.task.IntegrationTestBase;
 import okhttp3.mockwebserver.MockResponse;
-import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-
-import java.io.IOException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class ProxyControllerTest {
-
-    static final MockWebServer engine = new MockWebServer();
-
-    @DynamicPropertySource
-    static void engineProps(DynamicPropertyRegistry registry) throws IOException {
-        engine.start();
-        registry.add("engine.base-url", () -> engine.url("/").toString().replaceAll("/$", ""));
-    }
-
-    @AfterAll
-    static void stopEngine() throws IOException {
-        engine.shutdown();
-    }
+class ProxyControllerTest extends IntegrationTestBase {
 
     @Autowired
     TestRestTemplate rest;
