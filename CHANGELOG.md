@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.6.1 — M2: 任务链路 Java 化 (2026-08-20)
+
+- 任务端点（submit/status/cancel/health/feedback/scan-stale/stream）由 Spring 原生实现，异步热路径不再经过 FastAPI
+- 协议复刻三处 Python 契约：task_store.py Redis 状态机（key/TTL/16 字段 JSON）、broker.py Kafka 信封、task.py SSE 事件流——**Python Worker 零改动**
+- 真实 Worker E2E 验证：Java 提交 → Worker 消费执行 → 状态/SSE 回传完整闭环（含幂等、心跳健康 worker_alive）
+- 契约测试：sha256 幂等向量与 Python 对拍、golden JSON、Kafka 信封；Testcontainers（真 Redis/Kafka）集成测试
+- compose：kafka 双 listener（容器间 29092 / 宿主机 9092）+ gateway 接入 Redis/Kafka
+- 测试 44 个全绿；gateway-java 新增 8 主类
+
 ## v0.6.0 — M1: Java 网关上线 (2026-08-19)
 
 - Spring Boot 3.3 + JDK 21（虚拟线程）替换 Go 网关接管 :8080，Go 网关退役（目录保留至 M4 后删除）

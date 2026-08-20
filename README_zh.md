@@ -16,18 +16,13 @@
         │  POST /task/submit    POST /task/{id}/feedback
         │  GET  /task/{id}/stream (SSE)
         ▼
-  Spring Gateway (:8080)          代理 · 熔断降级 · 健康检查 · 指标
+  Spring Gateway (:8080)
+        │  异步任务路径（Java 原生，不经 FastAPI）：
+        │    submit ──→ Redis 状态 + Kafka ──→ Worker（Python，零改动）
+        │    SSE   ←── Redis PubSub(token) + 状态轮询 ◄──┘
         │
-        ▼
-  FastAPI  (:8000) ──────────────────────────────┐
-        │                                         │
-        │  submit ──→ Kafka ──→ Worker            │
-        │  feedback ──→ Kafka ──→ Worker          │
-        │                                         │
-        │  SSE ←── Redis (轮询状态 + Pub/Sub) ◄───┘
-        │
-        │  /query/full/stream: FastAPI 线程内运行 LangGraph
-        │  （同步路径 — 无需 Kafka / Worker）
+        │  同步查询路径（熔断+超时转发）：
+        │    /query/full/stream ──→ FastAPI(:8000) 线程内跑 LangGraph
         ▼
   ┌──────────────────────────────────────────────────────┐
   │  PostgreSQL · MySQL · SQLite (BIRD 11 数据库)        │

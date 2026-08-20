@@ -16,18 +16,13 @@ Natural language → SQL end-to-end system. LangGraph state machine orchestrates
         │  POST /task/submit    POST /task/{id}/feedback
         │  GET  /task/{id}/stream (SSE)
         ▼
-  Spring Gateway (:8080)          proxy · circuit-breaker · health · metrics
+  Spring Gateway (:8080)
+        │  async task path (Java-native, no FastAPI):
+        │    submit ──→ Redis state + Kafka ──→ Worker (Python, unchanged)
+        │    SSE   ←── Redis PubSub (tokens) + state polling ◄──┘
         │
-        ▼
-  FastAPI  (:8000) ──────────────────────────────┐
-        │                                         │
-        │  submit ──→ Kafka ──→ Worker            │
-        │  feedback ──→ Kafka ──→ Worker          │
-        │                                         │
-        │  SSE ←── Redis (poll state + Pub/Sub) ◄─┘
-        │
-        │  /query/full/stream: FastAPI runs LangGraph in-thread
-        │  (sync path — no Kafka, no Worker)
+        │  sync query path (proxied with timeout + circuit breaker):
+        │    /query/full/stream ──→ FastAPI (:8000) runs LangGraph in-thread
         ▼
   ┌──────────────────────────────────────────────────────┐
   │  PostgreSQL · MySQL · SQLite (BIRD 11 DBs)           │
