@@ -3,7 +3,6 @@ package com.nl2sql.gateway.task;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
-
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -24,10 +23,11 @@ public class TaskStoreService {
     public static final long HEARTBEAT_STALE_S = 60;
 
     private final StringRedisTemplate redis;
-    private final ObjectMapper om = new ObjectMapper();
+    private final ObjectMapper om;
 
-    public TaskStoreService(StringRedisTemplate redis) {
+    public TaskStoreService(StringRedisTemplate redis, ObjectMapper om) {
         this.redis = redis;
+        this.om = om;
     }
 
     /** ISO-8601 UTC，与 Python datetime.now(timezone.utc).isoformat() 等价（Worker 侧 fromisoformat 兼容 Z 后缀）。 */
