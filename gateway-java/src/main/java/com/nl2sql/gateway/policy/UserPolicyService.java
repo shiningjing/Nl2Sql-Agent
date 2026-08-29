@@ -81,7 +81,7 @@ public class UserPolicyService {
         return new Policy(row.userTag, row.role, dbs, row.qpsLimit, row.dailyQuota, row.status == 1);
     }
 
-    static Duration jitter(Duration base, double ratio) {
+    public static Duration jitter(Duration base, double ratio) {
         long millis = base.toMillis();
         long delta = (long) (millis * ratio);
         return Duration.ofMillis(Math.max(1, millis - delta + ThreadLocalRandom.current().nextLong(2 * delta)));

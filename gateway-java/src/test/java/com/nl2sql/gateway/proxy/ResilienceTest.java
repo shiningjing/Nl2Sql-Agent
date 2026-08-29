@@ -48,6 +48,28 @@ class ResilienceTest extends IntegrationTestBase {
     @Autowired
     CircuitBreakerRegistry breakerRegistry;
 
+    @Autowired
+    com.nl2sql.gateway.cache.ResultCacheService resultCache;
+
+    @Test
+    void engineUnavailableFallsBackToStaleCache() {
+        String cached = "{\"sql\":\"SELECT stale\",\"status\":\"SUCCESS\"}";
+        resultCache.put("boom q?", "california_schools", cached);
+        resilienceEngine.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START));
+
+        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+        headers.set("X-User-Id", "bench_admin");
+        headers.set("Content-Type", "application/json");
+        ResponseEntity<String> resp = rest.exchange("/api/v1/query", org.springframework.http.HttpMethod.POST,
+                new org.springframework.http.HttpEntity<>(
+                        "{\"question\":\"boom q?\",\"db_id\":\"california_schools\"}", headers),
+                String.class);
+
+        assertThat(resp.getStatusCode().value()).isEqualTo(200);
+        assertThat(resp.getHeaders().getFirst("X-Cache")).isEqualTo("stale");
+        assertThat(resp.getBody()).isEqualTo(cached);
+    }
+
     @Test
     void engineDisconnectReturns503() {
         resilienceEngine.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START));

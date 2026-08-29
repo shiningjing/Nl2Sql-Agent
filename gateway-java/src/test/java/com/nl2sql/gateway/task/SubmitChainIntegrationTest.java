@@ -35,6 +35,9 @@ class SubmitChainIntegrationTest extends IntegrationTestBase {
     @Autowired
     UserPolicyMapper policyMapper;
 
+    @Autowired
+    com.nl2sql.gateway.cache.ResultCacheService resultCache;
+
     @LocalServerPort
     int port;
 
@@ -63,6 +66,11 @@ class SubmitChainIntegrationTest extends IntegrationTestBase {
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     private List<Map> kafkaEnvelopesFor(String taskId) {
+        return kafkaEnvelopesFor(taskId, 15);
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private List<Map> kafkaEnvelopesFor(String taskId, int pollSeconds) {
         Map<String, Object> props = new HashMap<>();
         props.put("bootstrap.servers", kafka.getBootstrapServers());
         props.put("group.id", "it-" + System.nanoTime());
@@ -72,7 +80,7 @@ class SubmitChainIntegrationTest extends IntegrationTestBase {
         List<Map> hits = new ArrayList<>();
         try (var consumer = new DefaultKafkaConsumerFactory<String, String>(props).createConsumer()) {
             consumer.subscribe(List.of("nl2sql.task.request"));
-            consumer.poll(Duration.ofSeconds(15)).forEach(r -> {
+            consumer.poll(Duration.ofSeconds(pollSeconds)).forEach(r -> {
                 try {
                     Map env = om.readValue(r.value(), Map.class);
                     if (taskId.equals(env.get("task_id"))) {
@@ -161,6 +169,35 @@ class SubmitChainIntegrationTest extends IntegrationTestBase {
         ResponseEntity<Map> owner = rest.exchange("/api/v1/task/" + taskId + "/status",
                 HttpMethod.GET, json("local_user", null), Map.class);
         assertThat(owner.getStatusCode().value()).isEqualTo(200);
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void cachedSubmitShortCircuitsEngineAndKafka() throws Exception {
+        String cached = "{\"status\":\"SUCCESS\",\"sql\":\"SELECT 1\","
+                + "\"exec_result\":{\"row_count\":1},\"token_usage\":{},\"node_timings\":{}}";
+        resultCache.put("cached q?", "california_schools", cached);
+        int engineRequestsBefore = engine.getRequestCount();
+
+        ResponseEntity<Map> resp = rest.exchange("/api/v1/task/submit", HttpMethod.POST,
+                json("local_user", "{\"question\":\"cached q?\",\"db_id\":\"california_schools\"}"),
+                Map.class);
+        assertThat(resp.getStatusCode().value()).isEqualTo(202);
+        assertThat(resp.getBody().get("status")).isEqualTo("SUCCESS");
+        assertThat(resp.getBody().get("cache_hit")).isEqualTo("1");
+        String taskId = (String) resp.getBody().get("task_id");
+
+        // Redis 终态 SUCCESS + cache_hit 标记 + sql 保留
+        Map<String, Object> state = om.readValue(
+                redisTemplate.opsForValue().get("task:" + taskId), Map.class);
+        assertThat(state.get("status")).isEqualTo("SUCCESS");
+        assertThat(state.get("cache_hit")).isEqualTo(true);
+        assertThat(state.get("sql")).isEqualTo("SELECT 1");
+        assertThat(redisTemplate.opsForValue().get("taskowner:" + taskId)).isEqualTo("local_user");
+
+        // 引擎与 Kafka 均零新请求
+        assertThat(engine.getRequestCount()).isEqualTo(engineRequestsBefore);
+        assertThat(kafkaEnvelopesFor(taskId, 3)).isEmpty();
     }
 
     @Test

@@ -48,6 +48,8 @@ class TaskControllerTest {
     RateLimiterService rateLimiter;
     @MockBean
     QuotaService quota;
+    @MockBean
+    com.nl2sql.gateway.cache.ResultCacheService resultCache;   // 默认 get→null，不短路
 
     @TestConfiguration
     static class Cfg {
