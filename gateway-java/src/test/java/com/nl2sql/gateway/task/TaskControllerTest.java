@@ -1,5 +1,7 @@
 package com.nl2sql.gateway.task;
 
+import com.nl2sql.gateway.policy.UserPolicyInterceptor;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -33,6 +35,15 @@ class TaskControllerTest {
     KafkaPublisher publisher;
     @MockBean
     TaskStreamService streamService;
+
+    /** 切片会加载 WebConfig(注册身份闸门)——本类只测控制器，闸门放行；闸门自身有专测。 */
+    @MockBean
+    UserPolicyInterceptor policyInterceptor;
+
+    @BeforeEach
+    void allowAll() throws Exception {
+        when(policyInterceptor.preHandle(any(), any(), any())).thenReturn(true);
+    }
 
     @Test
     void submitReturns202WithTaskId() throws Exception {

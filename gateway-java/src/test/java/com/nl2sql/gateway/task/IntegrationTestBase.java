@@ -2,9 +2,15 @@ package com.nl2sql.gateway.task;
 
 import okhttp3.mockwebserver.MockWebServer;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.http.HttpRequest;
+import org.springframework.http.client.ClientHttpRequestExecution;
+import org.springframework.http.client.ClientHttpRequestInterceptor;
+import org.springframework.http.client.ClientHttpResponse;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
@@ -75,4 +81,27 @@ public abstract class IntegrationTestBase {
 
     @Autowired
     protected StringRedisTemplate redisTemplate;
+
+    @Autowired
+    protected TestRestTemplate rest;
+
+    /** 策略闸门要求所有 /api/v1/** 请求带 X-User-Id；local_user 为 V1 种子用户（user 角色，通配全库）。 */
+    @BeforeEach
+    void attachUserHeader() {
+        if (rest.getRestTemplate().getInterceptors().stream()
+                .noneMatch(UserHeaderInterceptor.class::isInstance)) {
+            rest.getRestTemplate().getInterceptors().add(new UserHeaderInterceptor());
+        }
+    }
+
+    static final class UserHeaderInterceptor implements ClientHttpRequestInterceptor {
+        @Override
+        public ClientHttpResponse intercept(HttpRequest request, byte[] body,
+                                           ClientHttpRequestExecution execution) throws IOException {
+            if (!request.getHeaders().containsKey("X-User-Id")) {
+                request.getHeaders().add("X-User-Id", "local_user");
+            }
+            return execution.execute(request, body);
+        }
+    }
 }

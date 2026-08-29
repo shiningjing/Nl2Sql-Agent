@@ -22,7 +22,7 @@ class ProxyControllerTest extends IntegrationTestBase {
     void proxiesPostWithBodyAndCustomHeader() throws Exception {
         engine.enqueue(new MockResponse().setResponseCode(202).setBody("{\"task_id\":\"t1\"}"));
         HttpHeaders headers = new HttpHeaders();
-        headers.set("X-User-Id", "bench_u01");
+        headers.set("X-User-Id", "bench_admin");   // 已种子用户（拦截器要求可解析身份）
         headers.set("Content-Type", "application/json");
 
         ResponseEntity<String> resp = rest.exchange("/api/v1/query", HttpMethod.POST,
@@ -34,7 +34,7 @@ class ProxyControllerTest extends IntegrationTestBase {
         RecordedRequest recorded = engine.takeRequest();
         assertThat(recorded.getMethod()).isEqualTo("POST");
         assertThat(recorded.getPath()).isEqualTo("/api/v1/query");
-        assertThat(recorded.getHeader("X-User-Id")).isEqualTo("bench_u01");
+        assertThat(recorded.getHeader("X-User-Id")).isEqualTo("bench_admin");
         assertThat(recorded.getHeader("X-Trace-Id")).isNotBlank();
         assertThat(recorded.getBody().readUtf8()).isEqualTo("{\"question\":\"q\"}");
     }
