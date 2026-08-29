@@ -91,6 +91,12 @@ public class TaskStoreService {
         redis.opsForValue().set("idempotent:" + key, taskId, TTL_IDEMPOTENT);
     }
 
+    /** SETNX 原子占位：true=占住；false=已被并发请求占用（GET 读走占位者 task_id）。 */
+    public boolean idempotentTryAcquire(String key, String taskId) {
+        return Boolean.TRUE.equals(redis.opsForValue()
+                .setIfAbsent("idempotent:" + key, taskId, TTL_IDEMPOTENT));
+    }
+
     /** 心跳判死：RUNNING 且心跳缺失/超 60s → TIMEOUT（复刻 scan_stale_tasks）。 */
     public List<String> scanStale() {
         List<String> stale = new ArrayList<>();
