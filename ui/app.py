@@ -7,6 +7,8 @@ from datetime import datetime
 from storage.config import Config
 
 API_BASE = os.getenv("API_BASE", f"http://127.0.0.1:{Config.API_PORT}")
+# M3 网关策略层要求所有 /api/v1/task|query 请求携带用户标识
+API_HEADERS = {"X-User-Id": os.getenv("NL2SQL_USER", "local_user")}
 USE_STREAMING = True
 
 st.set_page_config(page_title="NL2SQL Agent", page_icon="", layout="wide")
@@ -122,7 +124,8 @@ def _call_api_async(question: str, db_id: str, database_url: str) -> dict:
 
     # Step 1: submit task
     try:
-        submit_resp = httpx.post(f"{API_BASE}/api/v1/task/submit", json=llm_payload, timeout=10)
+        submit_resp = httpx.post(f"{API_BASE}/api/v1/task/submit", json=llm_payload,
+                                 headers=API_HEADERS, timeout=10)
         if submit_resp.status_code != 202:
             return {"sql": "", "exec_result": {"success": False, "error": f"Task submission failed ({submit_resp.status_code})"},
                     "token_usage": {}, "elapsed_ms": 0, "rag_chunks": [], "node_timings": {}, "raw_response": ""}
@@ -139,7 +142,8 @@ def _call_api_async(question: str, db_id: str, database_url: str) -> dict:
     seen_nodes = set()
 
     try:
-        with httpx.stream("GET", f"{API_BASE}/api/v1/task/{task_id}/stream", timeout=360) as resp:
+        with httpx.stream("GET", f"{API_BASE}/api/v1/task/{task_id}/stream",
+                          headers=API_HEADERS, timeout=360) as resp:
             current_event = None
             for line in resp.iter_lines():
                 if line.startswith("event:"):
@@ -215,6 +219,7 @@ def _call_feedback_async(task_id: str, feedback: str) -> dict:
         resp = httpx.post(
             f"{API_BASE}/api/v1/task/{task_id}/feedback",
             json={"feedback": feedback},
+            headers=API_HEADERS,
             timeout=10,
         )
         if resp.status_code != 202:
@@ -232,7 +237,8 @@ def _call_feedback_async(task_id: str, feedback: str) -> dict:
     token_buffer = ""
 
     try:
-        with httpx.stream("GET", f"{API_BASE}/api/v1/task/{task_id}/stream", timeout=360) as resp:
+        with httpx.stream("GET", f"{API_BASE}/api/v1/task/{task_id}/stream",
+                          headers=API_HEADERS, timeout=360) as resp:
             current_event = None
             for line in resp.iter_lines():
                 if line.startswith("event:"):
