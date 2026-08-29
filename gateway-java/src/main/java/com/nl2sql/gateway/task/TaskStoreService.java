@@ -97,6 +97,11 @@ public class TaskStoreService {
                 .setIfAbsent("idempotent:" + key, taskId, TTL_IDEMPOTENT));
     }
 
+    /** 任务归属者（recorder 落库用）；无归属记录返回 null。 */
+    public String owner(String taskId) {
+        return redis.opsForValue().get("taskowner:" + taskId);
+    }
+
     /** qcache 命中短路：不走 Kafka，直接落 SUCCESS 终态（cache_hit=true，终态 TTL）。 */
     public TaskState createFromCache(String taskId, String question, String dbId, String resultJson) {
         TaskState s = new TaskState();
