@@ -30,6 +30,11 @@ public class TaskState {
      *  反序列化兼容 List 与缺省。 */
     public Object conversation_turns = new LinkedHashMap<String, Object>();
 
+    /** qcache 命中短路时置 true；仅命中时序列化，不改变 16 字段基础契约。 */
+    @com.fasterxml.jackson.annotation.JsonProperty("cache_hit")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public Boolean cacheHitFlag;
+
     /** status 端点响应体：14 字段，与 pydantic TaskStatusResponse(**state) 的过滤一致。 */
     public Map<String, Object> toStatusResponse() {
         Map<String, Object> m = new LinkedHashMap<>();

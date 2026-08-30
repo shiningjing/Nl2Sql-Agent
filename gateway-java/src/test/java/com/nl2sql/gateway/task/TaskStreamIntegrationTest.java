@@ -1,5 +1,6 @@
 package com.nl2sql.gateway.task;
 
+import com.nl2sql.gateway.policy.PermissionService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.client.TestRestTemplate;
@@ -21,10 +22,14 @@ class TaskStreamIntegrationTest extends IntegrationTestBase {
     @Autowired
     TaskStoreService store;
 
+    @Autowired
+    PermissionService permissionService;
+
     @Test
     void emitsTokenStatusNodeDoneCompleteSequence() throws Exception {
         String taskId = TaskIdempotency.newTaskId();
         store.create(taskId, "q", "d", "");
+        permissionService.setOwner(taskId, "local_user");   // 直造状态需补归属（submit 路径自动写）
 
         // 异步推 token + 推进状态到 SUCCESS（模拟 Worker 行为）
         Thread simulator = new Thread(() -> {

@@ -1,39 +1,19 @@
 package com.nl2sql.gateway.proxy;
 
+import com.nl2sql.gateway.task.IntegrationTestBase;
 import okhttp3.mockwebserver.MockResponse;
-import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-
-import java.io.IOException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class ProxyControllerTest {
-
-    static final MockWebServer engine = new MockWebServer();
-
-    @DynamicPropertySource
-    static void engineProps(DynamicPropertyRegistry registry) throws IOException {
-        engine.start();
-        registry.add("engine.base-url", () -> engine.url("/").toString().replaceAll("/$", ""));
-    }
-
-    @AfterAll
-    static void stopEngine() throws IOException {
-        engine.shutdown();
-    }
+class ProxyControllerTest extends IntegrationTestBase {
 
     @Autowired
     TestRestTemplate rest;
@@ -42,7 +22,7 @@ class ProxyControllerTest {
     void proxiesPostWithBodyAndCustomHeader() throws Exception {
         engine.enqueue(new MockResponse().setResponseCode(202).setBody("{\"task_id\":\"t1\"}"));
         HttpHeaders headers = new HttpHeaders();
-        headers.set("X-User-Id", "bench_u01");
+        headers.set("X-User-Id", "bench_admin");   // 已种子用户（拦截器要求可解析身份）
         headers.set("Content-Type", "application/json");
 
         ResponseEntity<String> resp = rest.exchange("/api/v1/query", HttpMethod.POST,
@@ -54,7 +34,7 @@ class ProxyControllerTest {
         RecordedRequest recorded = engine.takeRequest();
         assertThat(recorded.getMethod()).isEqualTo("POST");
         assertThat(recorded.getPath()).isEqualTo("/api/v1/query");
-        assertThat(recorded.getHeader("X-User-Id")).isEqualTo("bench_u01");
+        assertThat(recorded.getHeader("X-User-Id")).isEqualTo("bench_admin");
         assertThat(recorded.getHeader("X-Trace-Id")).isNotBlank();
         assertThat(recorded.getBody().readUtf8()).isEqualTo("{\"question\":\"q\"}");
     }

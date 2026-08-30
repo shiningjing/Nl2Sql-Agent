@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.6.2 — M3: 高并发加固 (2026-08-30)
+
+- **策略层**：`X-User-Id` 身份闸门（未知 401/禁用 403/角色 403），策略 cache-aside（`policy:{tag}` 正缓存 600s±10% 抖动 + 未知名负缓存 60s 防穿透），admin 更新即删缓存下请求生效
+- **submit 五级校验链**：数据权限 403（db 白名单，`*` 通配）→ 全局/用户限流 429 → SETNX 原子幂等 → 日配额 429 → qcache → 提交；任务归属（`taskowner:{id}`）非本人 403、admin 直通
+- **限流/配额**：Lua 滑动窗口（ZSET 清窗→计数→占位单脚本原子，实测 50 并发限 10 恰好放行 10）+ 日配额 INCR；fail-open
+- **qcache 结果缓存**：`sha256(question|db_id)`，命中短路直接 SUCCESS（实测 69s 任务 → 123ms，引擎/Kafka 零请求）；熔断/超时降级回退陈旧缓存（200 + `X-Cache: stale`）
+- **write-behind 落库**：Kafka status/result 事件只作变脏信号，2s/100 条批量以 Redis 状态为准 upsert MySQL `task_record`（含 cache_hit/total_latency/node_timings/token_usage），SUCCESS 自动回写 qcache
+- **MySQL**：Flyway V1（user_policy + task_record 宽表 + 种子用户），MyBatis-Plus upsert
+- **Admin 端点**：`PUT /api/v1/admin/users/{tag}`（策略热更）+ `GET /api/v1/admin/stats`（按状态聚合）
+- **指标四组**：`gateway_ratelimit_rejected` / `gateway_quota_rejected` / `gateway_cache` / `gateway_recorder_flush`
+- UI 全部请求携带用户头；compose 网关接入 MySQL
+- 测试 81 个全绿（Testcontainers：Redis+Kafka+MySQL）；期间修复测试基座 `@DynamicPropertySource` 基类同名属性覆盖子类的根因 bug
+
 ## v0.6.1 — M2: 任务链路 Java 化 (2026-08-20)
 
 - 任务端点（submit/status/cancel/health/feedback/scan-stale/stream）由 Spring 原生实现，异步热路径不再经过 FastAPI

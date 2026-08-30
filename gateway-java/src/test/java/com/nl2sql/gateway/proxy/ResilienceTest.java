@@ -1,5 +1,6 @@
 package com.nl2sql.gateway.proxy;
 
+import com.nl2sql.gateway.task.IntegrationTestBase;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import okhttp3.mockwebserver.MockResponse;
@@ -26,19 +27,19 @@ import static org.assertj.core.api.Assertions.assertThat;
                 "resilience4j.circuitbreaker.instances.engine.minimumNumberOfCalls=4",
                 "resilience4j.timelimiter.instances.engine.timeoutDuration=800ms"
         })
-class ResilienceTest {
+class ResilienceTest extends IntegrationTestBase {
 
-    static final MockWebServer engine = new MockWebServer();
+    /** 独立引擎：disconnect/NO_RESPONSE 残留响应不污染共享引擎队列（JDK HttpClient 重试会多消费队列项）。 */
+    static final MockWebServer resilienceEngine = new MockWebServer();
 
     @DynamicPropertySource
-    static void engineProps(DynamicPropertyRegistry registry) throws IOException {
-        engine.start();
-        registry.add("engine.base-url", () -> engine.url("/").toString().replaceAll("/$", ""));
+    static void overrideEngine(DynamicPropertyRegistry registry) throws IOException {
+        useEngine(resilienceEngine);
     }
 
     @AfterAll
-    static void stopEngine() throws IOException {
-        engine.shutdown();
+    static void stopResilienceEngine() {
+        releaseEngine(resilienceEngine);
     }
 
     @Autowired
@@ -47,9 +48,31 @@ class ResilienceTest {
     @Autowired
     CircuitBreakerRegistry breakerRegistry;
 
+    @Autowired
+    com.nl2sql.gateway.cache.ResultCacheService resultCache;
+
+    @Test
+    void engineUnavailableFallsBackToStaleCache() {
+        String cached = "{\"sql\":\"SELECT stale\",\"status\":\"SUCCESS\"}";
+        resultCache.put("boom q?", "california_schools", cached);
+        resilienceEngine.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START));
+
+        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+        headers.set("X-User-Id", "bench_admin");
+        headers.set("Content-Type", "application/json");
+        ResponseEntity<String> resp = rest.exchange("/api/v1/query", org.springframework.http.HttpMethod.POST,
+                new org.springframework.http.HttpEntity<>(
+                        "{\"question\":\"boom q?\",\"db_id\":\"california_schools\"}", headers),
+                String.class);
+
+        assertThat(resp.getStatusCode().value()).isEqualTo(200);
+        assertThat(resp.getHeaders().getFirst("X-Cache")).isEqualTo("stale");
+        assertThat(resp.getBody()).isEqualTo(cached);
+    }
+
     @Test
     void engineDisconnectReturns503() {
-        engine.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START));
+        resilienceEngine.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START));
         ResponseEntity<String> resp = rest.getForEntity("/api/v1/query/t9-status", String.class);
         assertThat(resp.getStatusCode().value()).isEqualTo(503);
         assertThat(resp.getBody()).contains("engine unavailable");
@@ -60,7 +83,7 @@ class ResilienceTest {
         CircuitBreaker breaker = breakerRegistry.circuitBreaker("engine");
         // 6 次连接失败（窗口 4、阈值 50% → 达到 OPEN）
         for (int i = 0; i < 6; i++) {
-            engine.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START));
+            resilienceEngine.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START));
             rest.getForEntity("/api/v1/query/t9-status", String.class);
         }
         assertThat(breaker.getState()).isEqualTo(CircuitBreaker.State.OPEN);
@@ -77,7 +100,7 @@ class ResilienceTest {
 
     @Test
     void slowEngineTimesOut() {
-        engine.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE));
+        resilienceEngine.enqueue(new MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE));
         long start = System.nanoTime();
         ResponseEntity<String> resp = rest.getForEntity("/api/v1/query/t8-status", String.class);
         long elapsedMs = (System.nanoTime() - start) / 1_000_000;

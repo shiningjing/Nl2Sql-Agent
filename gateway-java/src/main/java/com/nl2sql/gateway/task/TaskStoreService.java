@@ -91,6 +91,53 @@ public class TaskStoreService {
         redis.opsForValue().set("idempotent:" + key, taskId, TTL_IDEMPOTENT);
     }
 
+    /** SETNX 原子占位：true=占住；false=已被并发请求占用（GET 读走占位者 task_id）。 */
+    public boolean idempotentTryAcquire(String key, String taskId) {
+        return Boolean.TRUE.equals(redis.opsForValue()
+                .setIfAbsent("idempotent:" + key, taskId, TTL_IDEMPOTENT));
+    }
+
+    /** 任务归属者（recorder 落库用）；无归属记录返回 null。 */
+    public String owner(String taskId) {
+        return redis.opsForValue().get("taskowner:" + taskId);
+    }
+
+    /** qcache 命中短路：不走 Kafka，直接落 SUCCESS 终态（cache_hit=true，终态 TTL）。 */
+    public TaskState createFromCache(String taskId, String question, String dbId, String resultJson) {
+        TaskState s = new TaskState();
+        s.task_id = taskId;
+        s.status = "SUCCESS";
+        s.question = question.substring(0, Math.min(200, question.length()));
+        s.db_id = dbId == null ? "" : dbId;
+        s.progress = 100;
+        try {
+            com.fasterxml.jackson.databind.JsonNode n = om.readTree(resultJson);
+            if (n.hasNonNull("sql")) {
+                s.sql = n.get("sql").asText();
+            }
+            if (n.has("exec_result")) {
+                s.exec_result = om.readValue(n.get("exec_result").toString(), Object.class);
+            }
+            if (n.has("token_usage")) {
+                s.token_usage = om.readValue(n.get("token_usage").toString(),
+                        new com.fasterxml.jackson.core.type.TypeReference<>() {
+                        });
+            }
+            if (n.has("node_timings")) {
+                s.node_timings = om.readValue(n.get("node_timings").toString(),
+                        new com.fasterxml.jackson.core.type.TypeReference<>() {
+                        });
+            }
+        } catch (Exception ignore) {
+            // 缓存载荷残缺：保留 SUCCESS 骨架
+        }
+        s.created_at = nowIso();
+        s.updated_at = nowIso();
+        s.cacheHitFlag = true;
+        save(s);
+        return s;
+    }
+
     /** 心跳判死：RUNNING 且心跳缺失/超 60s → TIMEOUT（复刻 scan_stale_tasks）。 */
     public List<String> scanStale() {
         List<String> stale = new ArrayList<>();

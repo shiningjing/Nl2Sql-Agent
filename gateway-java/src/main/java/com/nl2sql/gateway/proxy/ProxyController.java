@@ -21,21 +21,27 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Supplier;
 
-/** /api/v1/** 统一入口：路径以 /stream 结尾走流式透传，其余非流式转发（熔断+超时装饰）。 */
+/** /api/v1/** 统一入口：路径以 /stream 结尾走流式透传，其余非流式转发（熔断+超时装饰；
+ *  同步查询引擎不可用时降级 qcache 陈旧结果，X-Cache: stale）。 */
 @RestController
 public class ProxyController {
 
     private final HttpProxyService proxyService;
     private final CircuitBreaker circuitBreaker;
     private final TimeLimiter timeLimiter;
+    private final com.nl2sql.gateway.cache.ResultCacheService resultCache;
+    private final com.fasterxml.jackson.databind.ObjectMapper om =
+            new com.fasterxml.jackson.databind.ObjectMapper();
     private final ExecutorService virtualExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     public ProxyController(HttpProxyService proxyService,
                            CircuitBreakerRegistry breakerRegistry,
-                           TimeLimiterRegistry timeLimiterRegistry) {
+                           TimeLimiterRegistry timeLimiterRegistry,
+                           com.nl2sql.gateway.cache.ResultCacheService resultCache) {
         this.proxyService = proxyService;
         this.circuitBreaker = breakerRegistry.circuitBreaker("engine");
         this.timeLimiter = timeLimiterRegistry.timeLimiter("engine");
+        this.resultCache = resultCache;
     }
 
     @RequestMapping(value = "/api/v1/**",
@@ -58,10 +64,39 @@ public class ProxyController {
                 }
             });
         } catch (EngineUnavailableException e) {
+            String stale = staleCacheLookup(request, body);
+            if (stale != null) {
+                response.setStatus(200);
+                response.setContentType("application/json");
+                response.setHeader("X-Cache", "stale");
+                response.getOutputStream().write(stale.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                return;
+            }
             writeUnavailable(request, response, e.getMessage());
             return;
         }
         writeEngineResponse(resp, response);
+    }
+
+    /** 熔断/超时降级：仅同步查询 POST 且能解出 question/db_id 时查 qcache。 */
+    private String staleCacheLookup(HttpServletRequest request, byte[] body) {
+        if (!"POST".equals(request.getMethod())) {
+            return null;
+        }
+        String uri = request.getRequestURI();
+        if (!"/api/v1/query".equals(uri) && !"/api/v1/query/full".equals(uri)) {
+            return null;
+        }
+        try {
+            com.fasterxml.jackson.databind.JsonNode n = om.readTree(body);
+            if (!n.hasNonNull("question")) {
+                return null;
+            }
+            return resultCache.get(n.get("question").asText(),
+                    n.hasNonNull("db_id") ? n.get("db_id").asText() : null);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /** 非流式路径统一装饰：虚拟线程上执行 + TimeLimiter + CircuitBreaker。 */

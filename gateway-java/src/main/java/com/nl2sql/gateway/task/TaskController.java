@@ -1,5 +1,16 @@
 package com.nl2sql.gateway.task;
 
+import com.nl2sql.gateway.cache.ResultCacheService;
+import com.nl2sql.gateway.config.GatewayProperties;
+import com.nl2sql.gateway.recorder.TaskEventRecorder;
+import com.nl2sql.gateway.policy.PermissionService;
+import com.nl2sql.gateway.policy.RequireRole;
+import com.nl2sql.gateway.policy.UserPolicyInterceptor;
+import com.nl2sql.gateway.policy.UserPolicyService;
+import com.nl2sql.gateway.ratelimit.QuotaService;
+import com.nl2sql.gateway.ratelimit.RateLimiterService;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -13,7 +24,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** 任务端点——语义与 api/routes/task.py 逐条对齐；映射比 /api/v1/** 更具体，天然优先于透明代理。 */
+/** 任务端点——语义与 api/routes/task.py 逐条对齐；映射比 /api/v1/** 更具体，天然优先于透明代理。
+ *  submit 校验链（M3）：数据权限 403 → 全局/用户限流 429 → SETNX 幂等 → 日配额 429 → 提交。 */
 @RestController
 @RequestMapping("/api/v1/task")
 public class TaskController {
@@ -23,12 +35,27 @@ public class TaskController {
     private final TaskStoreService store;
     private final KafkaPublisher publisher;
     private final TaskStreamService streamService;
+    private final PermissionService permission;
+    private final RateLimiterService rateLimiter;
+    private final QuotaService quota;
+    private final GatewayProperties props;
+    private final ResultCacheService resultCache;
+    private final TaskEventRecorder recorder;
 
     public TaskController(TaskStoreService store, KafkaPublisher publisher,
-                          TaskStreamService streamService) {
+                          TaskStreamService streamService, PermissionService permission,
+                          RateLimiterService rateLimiter, QuotaService quota,
+                          GatewayProperties props, ResultCacheService resultCache,
+                          TaskEventRecorder recorder) {
         this.store = store;
         this.publisher = publisher;
         this.streamService = streamService;
+        this.permission = permission;
+        this.rateLimiter = rateLimiter;
+        this.quota = quota;
+        this.props = props;
+        this.resultCache = resultCache;
+        this.recorder = recorder;
     }
 
     public record SubmitRequest(
@@ -39,21 +66,49 @@ public class TaskController {
     }
 
     @PostMapping("/submit")
-    public ResponseEntity<Map<String, String>> submit(@RequestBody SubmitRequest req) {
+    public ResponseEntity<?> submit(@RequestBody SubmitRequest req, HttpServletRequest http) {
+        UserPolicyService.Policy policy =
+                (UserPolicyService.Policy) http.getAttribute(UserPolicyInterceptor.POLICY_ATTR);
+
+        if (!permission.dbAllowed(policy, req.db_id())) {
+            return forbidden("db_id not allowed: " + req.db_id());
+        }
+        if (!rateLimiter.allowGlobal(props.ratelimit().globalQps())
+                || !rateLimiter.allowUser(policy.userTag(), policy.qpsLimit())) {
+            return tooMany("rate limit exceeded");
+        }
+        String taskId = TaskIdempotency.newTaskId();
         if (req.idempotency_key() != null && !req.idempotency_key().isBlank()) {
             String idemKey = TaskIdempotency.key(req.idempotency_key(), req.question());
             String existing = store.idempotentGet(idemKey);
             if (existing != null) {
-                return ResponseEntity.accepted().body(Map.of("task_id", existing, "status", "PENDING"));
+                return ResponseEntity.accepted()
+                        .body(Map.of("task_id", existing, "status", "PENDING"));
             }
-            String taskId = TaskIdempotency.newTaskId();
-            store.idempotentSet(idemKey, taskId);
-            return accepted(taskId, req);
+            if (!store.idempotentTryAcquire(idemKey, taskId)) {
+                String winner = store.idempotentGet(idemKey);
+                return ResponseEntity.accepted().body(Map.of(
+                        "task_id", winner != null ? winner : taskId, "status", "PENDING"));
+            }
         }
-        return accepted(TaskIdempotency.newTaskId(), req);
+        if (!quota.tryConsume(policy.userTag(), policy.dailyQuota())) {
+            return tooMany("daily quota exceeded");
+        }
+        // qcache 命中：不走 Kafka/Worker，直接 SUCCESS 终态（仍标记落库）
+        String cached = resultCache.get(req.question(), req.db_id());
+        if (cached != null) {
+            store.createFromCache(taskId, req.question(),
+                    req.db_id() == null ? "" : req.db_id(), cached);
+            permission.setOwner(taskId, policy.userTag());
+            recorder.markDirty(taskId);
+            return ResponseEntity.accepted().body(Map.of(
+                    "task_id", taskId, "status", "SUCCESS", "cache_hit", "1"));
+        }
+        return accepted(taskId, req, policy);
     }
 
-    private ResponseEntity<Map<String, String>> accepted(String taskId, SubmitRequest req) {
+    private ResponseEntity<Map<String, String>> accepted(String taskId, SubmitRequest req,
+                                                          UserPolicyService.Policy policy) {
         String dbId = req.db_id() == null ? "" : req.db_id();
         String databaseUrl = req.database_url() == null ? "" : req.database_url();
 
@@ -71,6 +126,7 @@ public class TaskController {
         payload.put("fewshot_enabled", bool(req.fewshot_enabled(), true));
 
         store.create(taskId, req.question(), dbId, databaseUrl);
+        permission.setOwner(taskId, policy.userTag());
         publisher.publishSubmitted(taskId, payload);
         return ResponseEntity.accepted().body(Map.of("task_id", taskId, "status", "PENDING"));
     }
@@ -80,7 +136,11 @@ public class TaskController {
     }
 
     @GetMapping("/{task_id}/status")
-    public ResponseEntity<?> status(@PathVariable("task_id") String taskId) {
+    public ResponseEntity<?> status(@PathVariable("task_id") String taskId, HttpServletRequest http) {
+        ResponseEntity<?> denied = requireOwner(taskId, http);
+        if (denied != null) {
+            return denied;
+        }
         TaskState s = store.get(taskId);
         if (s == null) {
             return notFound();
@@ -89,21 +149,30 @@ public class TaskController {
     }
 
     @PostMapping("/{task_id}/cancel")
-    public Map<String, String> cancel(@PathVariable("task_id") String taskId) {
+    public ResponseEntity<?> cancel(@PathVariable("task_id") String taskId, HttpServletRequest http) {
+        ResponseEntity<?> denied = requireOwner(taskId, http);
+        if (denied != null) {
+            return denied;
+        }
         TaskState s = store.get(taskId);
         if (s == null) {
-            return Map.of("task_id", taskId, "status", "not_found");
+            return ResponseEntity.ok(Map.of("task_id", taskId, "status", "not_found"));
         }
         if ("SUCCESS".equals(s.status) || "FAILED".equals(s.status)
                 || "CANCELLED".equals(s.status) || "TIMEOUT".equals(s.status)) {
-            return Map.of("task_id", taskId, "status", s.status);
+            return ResponseEntity.ok(Map.of("task_id", taskId, "status", s.status));
         }
         store.requestCancel(taskId);
-        return Map.of("task_id", taskId, "status", "cancelled");
+        return ResponseEntity.ok(Map.of("task_id", taskId, "status", "cancelled"));
     }
 
     @GetMapping("/{task_id}/health")
-    public ResponseEntity<?> taskHealth(@PathVariable("task_id") String taskId) {
+    public ResponseEntity<?> taskHealth(@PathVariable("task_id") String taskId,
+                                        HttpServletRequest http) {
+        ResponseEntity<?> denied = requireOwner(taskId, http);
+        if (denied != null) {
+            return denied;
+        }
         TaskState s = store.get(taskId);
         if (s == null) {
             return notFound();
@@ -133,6 +202,7 @@ public class TaskController {
     }
 
     @PostMapping("/scan-stale")
+    @RequireRole("admin")
     public Map<String, Object> scanStale() {
         List<String> stale = store.scanStale();
         return Map.of("stale_count", stale.size(), "stale_task_ids", stale);
@@ -143,7 +213,11 @@ public class TaskController {
 
     @PostMapping("/{task_id}/feedback")
     public ResponseEntity<?> feedback(@PathVariable("task_id") String taskId,
-                                      @RequestBody FeedbackRequest req) {
+                                      @RequestBody FeedbackRequest req, HttpServletRequest http) {
+        ResponseEntity<?> denied = requireOwner(taskId, http);
+        if (denied != null) {
+            return denied;
+        }
         TaskState s = store.get(taskId);
         if (s == null) {
             return notFound();
@@ -185,7 +259,16 @@ public class TaskController {
     /** SSE 流：token 实时 + 状态轮询，事件序列复刻 task_stream；5 分钟上限。 */
     @GetMapping("/{task_id}/stream")
     public void stream(@PathVariable("task_id") String taskId,
-                       jakarta.servlet.http.HttpServletResponse response) throws Exception {
+                       HttpServletRequest request, HttpServletResponse response) throws Exception {
+        UserPolicyService.Policy policy =
+                (UserPolicyService.Policy) request.getAttribute(UserPolicyInterceptor.POLICY_ATTR);
+        // 归属校验只对已存在的任务：缺失任务保持 SSE error 契约（复刻 task_stream）
+        if (store.get(taskId) != null && !permission.isOwnerOrAdmin(taskId, policy)) {
+            response.setStatus(403);
+            response.setContentType("application/json");
+            response.getWriter().write("{\"detail\":\"not task owner\"}");
+            return;
+        }
         response.setContentType("text/event-stream");
         response.setCharacterEncoding("UTF-8");
         response.setHeader("X-Accel-Buffering", "no");
@@ -210,6 +293,24 @@ public class TaskController {
                     .getBytes(java.nio.charset.StandardCharsets.UTF_8));
             out.flush();
         }
+    }
+
+    /** 非 null = 已构造好 403 响应；null = 校验通过。 */
+    private ResponseEntity<?> requireOwner(String taskId, HttpServletRequest http) {
+        UserPolicyService.Policy policy =
+                (UserPolicyService.Policy) http.getAttribute(UserPolicyInterceptor.POLICY_ATTR);
+        if (!permission.isOwnerOrAdmin(taskId, policy)) {
+            return forbidden("not task owner");
+        }
+        return null;
+    }
+
+    private static ResponseEntity<Map<String, String>> forbidden(String detail) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("detail", detail));
+    }
+
+    private static ResponseEntity<Map<String, String>> tooMany(String detail) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(Map.of("detail", detail));
     }
 
     private static ResponseEntity<Map<String, String>> notFound() {

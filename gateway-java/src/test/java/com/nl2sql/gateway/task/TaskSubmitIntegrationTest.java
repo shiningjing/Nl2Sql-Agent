@@ -35,6 +35,7 @@ class TaskSubmitIntegrationTest extends IntegrationTestBase {
 
         assertThat(resp.getStatusCode().value()).isEqualTo(202);
         String taskId = (String) resp.getBody().get("task_id");
+        int engineRequestsBefore = engine.getRequestCount();
 
         // Redis 状态存在且为 PENDING（key 布局与 Python 一致）
         String raw = redisTemplate.opsForValue().get("task:" + taskId);
@@ -78,8 +79,8 @@ class TaskSubmitIntegrationTest extends IntegrationTestBase {
         }
         assertThat(found).as("kafka envelope for %s", taskId).isTrue();
 
-        // 任务端点没有被代理到引擎（MockWebServer 零请求）
-        assertThat(engine.getRequestCount()).isZero();
+        // 任务端点没有被代理到引擎（提交期间引擎零新请求——用增量断言，避免跨测试类共享引擎的计数污染）
+        assertThat(engine.getRequestCount()).isEqualTo(engineRequestsBefore);
     }
 
     @Test
