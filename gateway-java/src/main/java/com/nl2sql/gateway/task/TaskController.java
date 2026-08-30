@@ -2,6 +2,7 @@ package com.nl2sql.gateway.task;
 
 import com.nl2sql.gateway.cache.ResultCacheService;
 import com.nl2sql.gateway.config.GatewayProperties;
+import com.nl2sql.gateway.recorder.TaskEventRecorder;
 import com.nl2sql.gateway.policy.PermissionService;
 import com.nl2sql.gateway.policy.RequireRole;
 import com.nl2sql.gateway.policy.UserPolicyInterceptor;
@@ -39,11 +40,13 @@ public class TaskController {
     private final QuotaService quota;
     private final GatewayProperties props;
     private final ResultCacheService resultCache;
+    private final TaskEventRecorder recorder;
 
     public TaskController(TaskStoreService store, KafkaPublisher publisher,
                           TaskStreamService streamService, PermissionService permission,
                           RateLimiterService rateLimiter, QuotaService quota,
-                          GatewayProperties props, ResultCacheService resultCache) {
+                          GatewayProperties props, ResultCacheService resultCache,
+                          TaskEventRecorder recorder) {
         this.store = store;
         this.publisher = publisher;
         this.streamService = streamService;
@@ -52,6 +55,7 @@ public class TaskController {
         this.quota = quota;
         this.props = props;
         this.resultCache = resultCache;
+        this.recorder = recorder;
     }
 
     public record SubmitRequest(
@@ -90,12 +94,13 @@ public class TaskController {
         if (!quota.tryConsume(policy.userTag(), policy.dailyQuota())) {
             return tooMany("daily quota exceeded");
         }
-        // qcache 命中：不走 Kafka/Worker，直接 SUCCESS 终态
+        // qcache 命中：不走 Kafka/Worker，直接 SUCCESS 终态（仍标记落库）
         String cached = resultCache.get(req.question(), req.db_id());
         if (cached != null) {
             store.createFromCache(taskId, req.question(),
                     req.db_id() == null ? "" : req.db_id(), cached);
             permission.setOwner(taskId, policy.userTag());
+            recorder.markDirty(taskId);
             return ResponseEntity.accepted().body(Map.of(
                     "task_id", taskId, "status", "SUCCESS", "cache_hit", "1"));
         }

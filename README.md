@@ -11,22 +11,30 @@ Natural language → SQL end-to-end system. LangGraph state machine orchestrates
 ### System
 
 ```
-  Client (Streamlit UI / API)
-        │
+  Client (Streamlit UI / API) ── X-User-Id ──┐
+        │                                     │
         │  POST /task/submit    POST /task/{id}/feedback
         │  GET  /task/{id}/stream (SSE)
-        ▼
-  Spring Gateway (:8080)
+        ▼                                     │
+  Spring Gateway (:8080)                      │
+        │  identity gate: 401 unknown / 403 disabled|role|db|owner
+        │  submit chain: db-whitelist → rate limit (Lua sliding window)
+        │               → SETNX idempotent → daily quota → qcache
+        │
         │  async task path (Java-native, no FastAPI):
         │    submit ──→ Redis state + Kafka ──→ Worker (Python, unchanged)
         │    SSE   ←── Redis PubSub (tokens) + state polling ◄──┘
+        │    Kafka status/result ──→ write-behind recorder ──→ MySQL task_record
+        │                              └── SUCCESS → qcache write-back
         │
         │  sync query path (proxied with timeout + circuit breaker):
         │    /query/full/stream ──→ FastAPI (:8000) runs LangGraph in-thread
+        │    engine down + qcache hit ──→ 200 stale result (X-Cache: stale)
         ▼
   ┌──────────────────────────────────────────────────────┐
-  │  PostgreSQL · MySQL · SQLite (BIRD 11 DBs)           │
-  │  ChromaDB (RAG embeddings) · Redis (state + tokens)  │
+  │  PostgreSQL · MySQL (ops: user_policy/task_record)   │
+  │  SQLite (BIRD 11 DBs) · ChromaDB (RAG embeddings)   │
+  │  Redis (state + tokens + policy + ratelimit + qcache)│
   └──────────────────────────────────────────────────────┘
 ```
 

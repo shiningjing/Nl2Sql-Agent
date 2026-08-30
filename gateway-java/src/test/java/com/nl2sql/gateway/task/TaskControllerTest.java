@@ -50,6 +50,8 @@ class TaskControllerTest {
     QuotaService quota;
     @MockBean
     com.nl2sql.gateway.cache.ResultCacheService resultCache;   // 默认 get→null，不短路
+    @MockBean
+    com.nl2sql.gateway.recorder.TaskEventRecorder recorder;    // void markDirty 默认 no-op
 
     @TestConfiguration
     static class Cfg {
