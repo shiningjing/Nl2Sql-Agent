@@ -57,4 +57,17 @@ class AccessLogFilterTest {
         String line = appender.list.get(0).getFormattedMessage();
         assertThat(line).contains("\"client_ip\":\"127.0.0.1\"");
     }
+
+    @Test
+    void exceptionPassingThroughIsLoggedAs500AndRethrown() throws Exception {
+        MockHttpServletRequest req = new MockHttpServletRequest("POST", "/api/v1/task/submit");
+        MockHttpServletResponse res = new MockHttpServletResponse();
+        org.assertj.core.api.Assertions
+                .assertThatThrownBy(() -> filter.doFilter(req, res,
+                        (request, response) -> { throw new IllegalStateException("boom"); }))
+                .isInstanceOf(IllegalStateException.class);
+        String line = appender.list.get(0).getFormattedMessage();
+        // 回归：压测期间 5xx 曾被记成默认 200（异常穿透状态捕获）
+        org.assertj.core.api.Assertions.assertThat(line).contains("\"status\":500");
+    }
 }

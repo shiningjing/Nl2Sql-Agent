@@ -1,0 +1,8 @@
+gateway_cache_total{result="hit"} 53467.0
+gateway_cache_total{result="miss"} 164510.0
+gateway_quota_rejected_total 0.0
+gateway_ratelimit_rejected_total{type="global"} 0.0
+gateway_ratelimit_rejected_total{type="user"} 0.0
+gateway_recorder_flush_seconds_count 11
+gateway_recorder_flush_seconds_max 12.333530276
+gateway_recorder_flush_seconds_sum 63.732264142
