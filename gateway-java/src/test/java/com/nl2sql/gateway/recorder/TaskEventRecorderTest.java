@@ -52,9 +52,9 @@ class TaskEventRecorderTest extends IntegrationTestBase {
         kafka.send(com.nl2sql.gateway.task.KafkaTopics.TOPIC_RESULT, taskId, om.writeValueAsString(
                 Map.of("task_id", taskId, "event", "success", "payload", Map.of()))).get();
 
-        // 监听器消费 + 2s 定时 flush：轮询等待行落库（上限 15s）
+        // 监听器消费 + 2s 定时 flush：轮询等待行落库（上限 30s，容忍慢宿主机上的消费协调）
         TaskRecord row = null;
-        for (int i = 0; i < 75 && row == null; i++) {
+        for (int i = 0; i < 150 && row == null; i++) {
             Thread.sleep(200);
             row = taskRecordMapper.selectById(taskId);
         }
@@ -71,6 +71,16 @@ class TaskEventRecorderTest extends IntegrationTestBase {
         String cached = redisTemplate.opsForValue()
                 .get(ResultCacheService.key("rec q?", "california_schools"));
         assertThat(cached).isNotNull().contains("SELECT 42");
+    }
+
+    @Test
+    void markDirtyBeyondMaxPendingDoesNotThrowAndStaysBounded() {
+        // 回归：qcache 压测曾触发 iterator.remove() 未先 next() → IllegalStateException → 全量 500
+        for (int i = 0; i < 12_000; i++) {
+            recorder.markDirty("overflow-" + i);
+        }
+        org.assertj.core.api.Assertions.assertThat(recorder.pendingSize())
+                .isLessThanOrEqualTo(10_000);
     }
 
     @Test

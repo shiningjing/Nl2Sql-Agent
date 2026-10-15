@@ -27,6 +27,12 @@ public class AccessLogFilter extends OncePerRequestFilter {
         StatusCapture capture = new StatusCapture(response);
         try {
             filterChain.doFilter(request, capture);
+        } catch (ServletException | IOException e) {
+            capture.status = 500;   // 异常穿透时状态由容器事后写入——先记 5xx 再抛出
+            throw e;
+        } catch (RuntimeException e) {
+            capture.status = 500;
+            throw e;
         } finally {
             long elapsedMs = (System.nanoTime() - start) / 1_000_000;
             String clientIp = request.getHeader("X-Forwarded-For");

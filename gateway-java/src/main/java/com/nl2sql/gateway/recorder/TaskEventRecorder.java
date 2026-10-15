@@ -23,7 +23,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class TaskEventRecorder {
 
     private static final int MAX_PENDING = 10_000;
-    private static final int BATCH = 100;
+    private static final int BATCH = 500;
 
     private final Set<String> dirty = ConcurrentHashMap.newKeySet();
     private final TaskStoreService store;
@@ -58,15 +58,38 @@ public class TaskEventRecorder {
     public void markDirty(String taskId) {
         dirty.add(taskId);
         if (dirty.size() > MAX_PENDING) {
-            dirty.iterator().remove();   // 满则丢旧标记（最终一致容忍）
+            // 满则丢一个旧标记（最终一致容忍）。CHM 迭代器 remove 前必须先 next()，
+            // 否则 IllegalStateException——qcache 压测（脏标记入队远快于 flush 出队）触发过全量 500。
+            var it = dirty.iterator();
+            if (it.hasNext()) {
+                it.next();
+                it.remove();
+            }
         }
     }
 
     @Scheduled(fixedDelay = 2000)
     public void flush() {
-        if (dirty.isEmpty()) {
-            return;
+        // 单次 flush 最多工作 2s：循环取批直到清空或预算耗尽，高入队速率下也能追平
+        long deadline = System.currentTimeMillis() + 2_000;
+        while (!dirty.isEmpty() && System.currentTimeMillis() < deadline) {
+            List<String> batch = drainBatch();
+            if (batch.isEmpty()) {
+                return;
+            }
+            flushTimer.record(() -> {
+                for (String id : batch) {
+                    try {
+                        record(id);
+                    } catch (Exception e) {
+                        // 单行失败不拖垮批次
+                    }
+                }
+            });
         }
+    }
+
+    private List<String> drainBatch() {
         List<String> batch = new ArrayList<>(Math.min(BATCH, dirty.size()));
         for (String id : dirty) {
             if (batch.size() >= BATCH) {
@@ -76,15 +99,12 @@ public class TaskEventRecorder {
                 batch.add(id);
             }
         }
-        flushTimer.record(() -> {
-            for (String id : batch) {
-                try {
-                    record(id);
-                } catch (Exception e) {
-                    // 单行失败不拖垮批次
-                }
-            }
-        });
+        return batch;
+    }
+
+    /** 待落库积压量（压测/回归断言用）。 */
+    public int pendingSize() {
+        return dirty.size();
     }
 
     private void record(String taskId) throws Exception {
