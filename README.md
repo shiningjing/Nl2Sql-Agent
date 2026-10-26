@@ -114,15 +114,7 @@ cp .env.example .env
 docker compose -f deployment/docker-compose.yml up -d
 ```
 
-This starts 6 services: **FastAPI** (:8000) + **Streamlit** (:8501) + **Redis** (:6379) + **PostgreSQL** (:5432) + **MySQL** (:3306) + **Kafka** (:9092).
-
-To include Go services:
-
-```bash
-# Build and run Go MCP Server + Go API Gateway
-cd tools/mcp-server-go && go build -o mcp-server-go.exe . && cd ../..
-cd gateway && go build -o gateway.exe . && cd ..
-```
+This starts 7 services: **FastAPI** (:8000) + **Streamlit** (:8501) + **Spring Gateway** (:8080) + **Redis** (:6379) + **PostgreSQL** (:5432) + **MySQL** (:3306) + **Kafka** (:9092).
 
 ### 3. Open
 
@@ -273,8 +265,8 @@ nl2sql-agent/
   guard/                   # safety_rules (9 rules) + error_types + error_classifier
   tools/
     sql_executor.py        # SQL execution engine
-  gateway-java/            # Spring Gateway (proxy + circuit breaker + metrics)
-  gateway/                 # [DEPRECATED M1] Go 网关, 仅为参照保留, M4 后删除
+  gateway-java/            # Spring Gateway (auth/ratelimit/idempotency/qcache + circuit breaker + metrics)
+  bench/                   # k6 压测脚本 + 种子用户（报告见 docs/benchmarks/）
   retrieval/               # RAG pipeline (schema + domain + sample rows)
   observability/           # TraceLogger + OTel bridge
   evaluation/              # BIRD evaluation runner
@@ -282,6 +274,7 @@ nl2sql-agent/
   configs/                 # Prompt versions + system prompts
   corpus/bird_fewshot/     # Few-shot examples (by db_id + dialect)
   deployment/              # Dockerfile + docker-compose.yml
+  docs/benchmarks/         # 压测报告（网关 k6 + 并行任务执行）
   tests/                   # 14 test files (188+ tests)
   ui/                      # Streamlit app (ChatGPT-style)
 ```

@@ -89,6 +89,8 @@ services:
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
+      # 固定 cluster id：随机 ID 会在容器重建时触发存储重格式化（topic/分区数丢失）
+      KAFKA_CLUSTER_ID: RZb1eMlL8zZ3Jk7DxJvEJQ
       KAFKA_LISTENERS: EXTERNAL://0.0.0.0:9092,INTERNAL://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093
       KAFKA_ADVERTISED_LISTENERS: EXTERNAL://127.0.0.1:9092,INTERNAL://kafka:29092
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL

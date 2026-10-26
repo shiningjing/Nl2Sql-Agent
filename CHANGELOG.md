@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.8.0 — M4b: 并行任务执行基准 (2026-10-26)
+
+- **Kafka 分区横向扩展实证**：request topic 1→8 分区 + 1→4 Worker（消费组自动均分，Python/Java 零代码改动）
+- **4 Worker × 50 真实任务**（DeepSeek 实调）：**成功率 100%、总墙钟 5 分 15 秒（≈9.5 任务/分钟）、加速比近线性 4×**；Worker 负载按 task_id 哈希均衡（node 事件 56/84/125/129）；端到端 P50 107s（长尾为排队等待，设计内形态）
+- 冒烟先行：2 Worker 验证并行机制，揭穿哈希偏斜假串行（node 事件计数法）；Worker 内存实测 707MB/个（修正 1.5-2GB 预估，4 Worker ≈ 2.8GB 可与日常负载共存）
+- 修复 apache/kafka 镜像随机 cluster id 导致的存储重格式化（compose 固定 KAFKA_CLUSTER_ID，分区数可跨容器重建持久化）
+- 报告：`docs/benchmarks/2026-10-26-m4b-parallel-tasks.md`；与 M4a 网关压测构成完整高并发证据链
+
+## v0.7.0 — M4a: 网关高并发压测 (2026-10-15)
+
+- **k6 四场景压测**（不触真实 LLM，纯网关热路径，50/100 并发，累计 56.8 万请求，失败率 0%）：status 读路径 **2372 RPS / P99 52ms**、qcache 命中 **1603 RPS / P99 67ms**、submit 写路径 **714 RPS / P99 180ms**（主机空闲时 1890 RPS / avg 22ms）、拒绝风暴 **3391 RPS / P99 75ms**（100 并发滥用下优雅 429/401）
+- **压测抓出 P0 缺陷并修复**：Recorder dirty 集合溢出时 `CHM iterator.remove()` 未先 `next()` → qcache 风暴下全量 500；flush 改循环取批（500/批、单次预算 2s）+ 修复访问日志异常穿透记 200 → 各带回归测试，83/83 全绿
+- **write-behind 天花板实测**：MySQL upsert 持续 ~700 行/秒，超出走有界积压丢弃（设计内降级）
+- `bench/` 压测工具集（种子用户 + 4 场景 + 编排）与报告 `docs/benchmarks/`
+- 删除已退役的 Go 网关目录（M1 起由 Spring 网关替代）
+
 ## v0.6.2 — M3: 高并发加固 (2026-08-30)
 
 - **策略层**：`X-User-Id` 身份闸门（未知 401/禁用 403/角色 403），策略 cache-aside（`policy:{tag}` 正缓存 600s±10% 抖动 + 未知名负缓存 60s 防穿透），admin 更新即删缓存下请求生效
